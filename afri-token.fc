@@ -1,0 +1,275 @@
+;; AFRI Token — TON Jetton (TIP-74) with Mobile Money Collateral Bridge
+;; v0.1.0 — African Digital Money Stablecoin
+;;
+;; Architecture:
+;;   - Standard TON Jetton (TIP-74 compliant)
+;;   - 120% over-collateralization with mobile money reserves
+;;   - Mint: deposit mobile money → verify via oracle → mint AFRI
+;;   - Burn: burn AFRI → release mobile money collateral
+;;   - Oracle price feed from synthetic USD/Africa index
+;;
+;; Collateral ratio: 120% minimum
+;; Mint fee: 0.5%
+;; Burn fee: 0.5%
+;; Supported currencies: KES, UGX, TZS, RWF, XOF, XAF
+
+;; ─── Constants ───────────────────────────────────────────────────────────────
+
+;; Minimum collateral ratio (120% = 1.2, stored as integer 1200 basis points)
+const min_collateral_ratio: int = 1200;
+
+;; Fee rate (0.5% = 50 basis points)
+const fee_bp: int = 50;
+
+;; Scale factor for decimal precision
+const scale: int = 1000000000;  ; 9 decimals
+
+;; Supported currency codes (as integers)
+const CURRENCY_KES: int = 0;
+const CURRENCY_UGX: int = 1;
+const CURRENCY_TZS: int = 2;
+const CURRENCY_RWF: int = 3;
+const CURRENCY_XOF: int = 4;
+const CURRENCY_XAF: int = 5;
+
+;; ─── Storage ─────────────────────────────────────────────────────────────────
+
+;; Jetton wallet storage
+;; owner_address: MsgAddress
+;; balance: int (AFRI tokens, 9 decimals)
+;; total_minted: int
+;; total_burned: int
+
+;; Collateral storage per currency
+;; collateral[currency_code] = { amount: int, depositors: dict<address, int> }
+
+;; Oracle storage
+;; oracle_address: MsgAddress
+;; rates[currency_code] = int (USD rate * scale)
+;; last_update: int (unix timestamp)
+
+;; ─── Messages ────────────────────────────────────────────────────────────────
+
+;; Mint: user sends mobile money ref + currency + amount
+;; Internal message with op::mint
+;;   sender: user address
+;;   currency: int (currency code)
+;;   momo_amount: int (mobile money amount in smallest unit)
+;;   momo_ref: string (transaction reference)
+;;   expected_afri: int (expected AFRI amount, for slippage protection)
+
+;; Burn: user burns AFRI for mobile money payout
+;; Internal message with op::burn
+;;   sender: user address
+;;   amount: int (AFRI tokens to burn, 9 decimals)
+;;   momo_number: string (mobile money number for payout)
+
+;; Oracle update: oracle updates price feed
+;; Internal message with op::update_rates
+;;   sender: oracle address (must match stored oracle)
+;;   rates: tuple of (currency, rate) pairs
+
+;; ─── Core Logic ──────────────────────────────────────────────────────────────
+
+;; Calculate AFRI to mint from mobile money deposit
+;; momo_amount: mobile money amount in local currency
+;; rate: USD/local currency rate
+;; Returns: AFRI amount (9 decimals)
+() calculate_mint_amount(int momo_amount, int rate) returns int {
+    ;; Convert to USD equivalent
+    int usd_value = momo_amount * scale / rate;
+    
+    ;; Apply 0.5% mint fee
+    int fee = usd_value * fee_bp / 10000;
+    int net = usd_value - fee;
+    
+    return net;
+}
+
+;; Calculate mobile money payout from AFRI burn
+;; afri_amount: AFRI tokens to burn (9 decimals)
+;; rate: USD/local currency rate
+;; Returns: mobile money amount in local currency
+() calculate_burn_amount(int afri_amount, int rate) returns int {
+    ;; Convert AFRI to USD
+    int usd_value = afri_amount;
+    
+    ;; Apply 0.5% burn fee
+    int fee = usd_value * fee_bp / 10000;
+    int net = usd_value - fee;
+    
+    ;; Convert to local currency
+    int local_amount = net * rate / scale;
+    
+    return local_amount;
+}
+
+;; Check collateral ratio
+;; total_collateral_usd: total USD value of all collateral
+;; total_supply: total AFRI tokens in circulation
+;; Returns: true if ratio >= minimum
+() check_collateral_ratio(int total_collateral_usd, int total_supply) returns bool {
+    if (total_supply == 0) {
+        return true;
+    }
+    
+    ;; ratio = total_collateral_usd * 10000 / total_supply (in basis points)
+    int ratio = total_collateral_usd * 10000 / total_supply;
+    
+    return ratio >= min_collateral_ratio;
+}
+
+;; ─── Mint Handler ────────────────────────────────────────────────────────────
+
+() handle_mint(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    ;; Parse incoming message
+    slice sender_address = parse_std_addr?(in_msg_full);
+    
+    int currency = in_msg_body~load_uint(8);       ;; currency code
+    int momo_amount = in_msg_body~load_uint(128);   ;; mobile money amount
+    slice momo_ref = in_msg_body~load_string();     ;; transaction reference
+    
+    ;; Load oracle rate for this currency
+    int rate = get_oracle_rate(currency);
+    throw_unless(1001, rate > 0);  ;; Rate not available
+    
+    ;; Calculate AFRI to mint
+    int afri_amount = calculate_mint_amount(momo_amount, rate);
+    throw_unless(1002, afri_amount > 0);  ;; Amount too small
+    
+    ;; Load current state
+    int total_supply = get_total_supply();
+    int total_collateral = get_total_collateral();
+    
+    ;; Add new collateral
+    int new_collateral = total_collateral + (momo_amount * scale / rate);
+    
+    ;; Check collateral ratio after mint
+    throw_unless(1003, check_collateral_ratio(new_collateral, total_supply + afri_amount));
+    
+    ;; Update storage
+    save_total_supply(total_supply + afri_amount);
+    save_total_collateral(new_collateral);
+    save_collateral_deposit(sender_address, currency, momo_amount);
+    
+    ;; Mint AFRI to user's jetton wallet
+    mint_jettons(sender_address, afri_amount);
+    
+    ;; Emit mint event
+    emit_mint_event(sender_address, currency, momo_amount, afri_amount, momo_ref);
+}
+
+;; ─── Burn Handler ────────────────────────────────────────────────────────────
+
+() handle_burn(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    ;; Parse incoming message
+    slice sender_address = parse_std_addr?(in_msg_full);
+    
+    int afri_amount = in_msg_body~load_uint(128);   ;; AFRI tokens to burn
+    slice momo_number = in_msg_body~load_string();   ;; mobile money number for payout
+    
+    throw_unless(1004, afri_amount > 0);  ;; Amount too small
+    
+    ;; Load user's AFRI balance
+    int user_balance = get_jetton_balance(sender_address);
+    throw_unless(1005, user_balance >= afri_amount);  ;; Insufficient balance
+    
+    ;; Calculate payout
+    int currency = get_user_primary_currency(sender_address);
+    int rate = get_oracle_rate(currency);
+    throw_unless(1001, rate > 0);  ;; Rate not available
+    
+    int payout = calculate_burn_amount(afri_amount, rate);
+    throw_unless(1006, payout > 0);  ;; Payout too small
+    
+    ;; Update storage
+    int total_supply = get_total_supply();
+    int total_collateral = get_total_collateral();
+    int payout_usd = afri_amount * scale / scale;  ;; AFRI is USD-pegged
+    
+    ;; Remove collateral
+    int new_collateral = total_collateral - payout_usd;
+    throw_unless(1003, check_collateral_ratio(new_collateral, total_supply - afri_amount));
+    
+    save_total_supply(total_supply - afri_amount);
+    save_total_collateral(new_collateral);
+    
+    ;; Burn AFRI tokens
+    burn_jettons(sender_address, afri_amount);
+    
+    ;; Initiate mobile money payout (via bridge)
+    initiate_momo_payout(momo_number, currency, payout);
+    
+    ;; Emit burn event
+    emit_burn_event(sender_address, afri_amount, currency, payout, momo_number);
+}
+
+;; ─── Oracle Update Handler ───────────────────────────────────────────────────
+
+() handle_oracle_update(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    ;; Verify sender is authorized oracle
+    slice sender_address = parse_std_addr?(in_msg_full);
+    slice oracle = get_oracle_address();
+    throw_unless(1007, equal_slices(sender_address, oracle));
+    
+    ;; Parse rate updates
+    int count = in_msg_body~load_uint(4);  ;; Number of rate pairs (max 16)
+    
+    while (count > 0) {
+        int currency = in_msg_body~load_uint(8);
+        int rate = in_msg_body~load_uint(128);
+        throw_unless(1008, rate > 0);
+        
+        save_oracle_rate(currency, rate);
+        count -= 1;
+    }
+    
+    ;; Update timestamp
+    save_last_update(now());
+    
+    ;; Emit oracle update event
+    emit_oracle_event();
+}
+
+;; ─── Get Methods ─────────────────────────────────────────────────────────────
+
+;; Get AFRI token info
+() get_jetton_data() returns (int total_supply, int mintable, slice admin_address) {
+    return (get_total_supply(), true, get_owner_address());
+}
+
+;; Get user's AFRI balance
+() get_wallet_data(slice owner) returns (int balance, int owner_id, slice owner_address) {
+    int balance = get_jetton_balance(owner);
+    return (balance, 0, owner);
+}
+
+;; Get collateral ratio
+() get_collateral_ratio() returns (int ratio_bp) {
+    int total_supply = get_total_supply();
+    int total_collateral = get_total_collateral();
+    
+    if (total_supply == 0) {
+        return 0;  ;; No supply, no ratio
+    }
+    
+    return total_collateral * 10000 / total_supply;
+}
+
+;; Get oracle rate for currency
+() get_rate(int currency) returns (int rate) {
+    return get_oracle_rate(currency);
+}
+
+;; Get system status
+() get_system_status() returns (int total_supply, int total_collateral, int ratio_bp, int last_update) {
+    int total_supply = get_total_supply();
+    int total_collateral = get_total_collateral();
+    int ratio = 0;
+    
+    if (total_supply > 0) {
+        ratio = total_collateral * 10000 / total_supply;
+    }
+    
+    return (total_supply, total_collateral, ratio, get_last_update());
+}

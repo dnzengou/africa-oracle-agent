@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Go
+oracle_agent
+oracle_agent.exe
+*.test
+*.out
+
+# Build artifacts
+build/
+dist/
+*.boc
+*.fift
+
+# Logs / data
+*.log
+*.jsonl
+feeds.jsonl
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# IDE
+.vscode/
+.idea/
+*.swp
