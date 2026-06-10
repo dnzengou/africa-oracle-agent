@@ -63,6 +63,30 @@ vercel --prod
 curl https://<project>.vercel.app/health
 ```
 
+## Path E — Self-host on African VPS (Sovereign + Affordable)
+
+Any operator can run AFRI on a $4–6/mo VPS in an African data centre (Africa Data Centres, Liquid Intelligent Technologies, Hetzner edge, Vultr Johannesburg). No SaaS dependency, no US/EU jurisdiction in the path.
+
+```sh
+# On the VPS (Ubuntu/Debian, Docker installed):
+git clone https://github.com/<owner>/africa-oracle-agent
+cd africa-oracle-agent
+docker compose up -d
+
+# Verify
+docker compose ps
+curl http://localhost:8000/health
+curl -s -X POST http://localhost:8000/feeds/quorum \
+  -H 'Content-Type: application/json' \
+  -d '{"min_providers":2}' | head -30
+
+# Reverse proxy (Caddy in one line; Auto-HTTPS via Let's Encrypt):
+echo "oracle.yourdomain.africa { reverse_proxy localhost:8000 }" > /etc/caddy/Caddyfile
+caddy reload
+```
+
+Resource footprint: 1 vCPU + 512 MB. Stateless — no Redis, no Postgres, no shared state.
+
 ## Path D — Local Docker (verify Dockerfile before pushing)
 
 ```sh
@@ -80,13 +104,29 @@ docker buildx build --platform linux/amd64,linux/arm64 -t africa-oracle:v0.2.0 .
 
 ```sh
 URL="https://<your-deploy-url>"
+
+# Liveness + observability
 curl -s "$URL/health" | jq .
+curl -s "$URL/metrics" | head -10
+
 curl -s "$URL/providers" | jq 'keys'
+
+# Single feed
 curl -s -X POST "$URL/hunt" \
   -H 'Content-Type: application/json' \
   -d '{"provider":"mtn","country":"GH"}' | jq .
+
+# Aggregated (async)
 curl -s -X POST "$URL/feeds/all" -H 'Content-Type: application/json' -d '{}' \
   | jq '.currencies, .agents_reporting'
+
+# Resilient — quorum filter (single-provider currencies excluded)
+curl -s -X POST "$URL/feeds/quorum" \
+  -H 'Content-Type: application/json' -d '{"min_providers":2}' \
+  | jq '.currencies, .quorum_failed'
+
+# Scalable — SSE stream
+curl -N "$URL/feeds/stream?interval=15"
 ```
 
 ## Rollback

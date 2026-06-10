@@ -1,14 +1,20 @@
 ---
 name: africa-oracle-devflow
-description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads provider config, ARM64 deploy targets, R²S² gate, and known scope boundaries. Trigger on any composite DevFlow command (B, P, D, Bl, E, CI, Im, C, I or combinations) when working in this repo.
+description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads provider config, ARM64 deploy targets, 5-pillar value prop (Resilient/Sovereign/Scalable/Affordable/Alternative), R²S² gate, and known scope boundaries. Trigger on any composite DevFlow command (B, P, D, Bl, E, CI, Im, C, I or combinations) when working in this repo.
 metadata:
   type: skill
   parent: devflow@1.1
-  lineage: [devflow, kafca, evo-metaclaw]
-  evolved_from: 2026-06-08 session
-  fitness: pending  # bumped on next successful pipeline run
+  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0]
+  evolved_from: 2026-06-08 5-pillar fine-tune session
+  fitness: 0.88  # 5-pillar avg score post-v0.3.0
   niche: phase-0-stablecoin-oracle
-  version: 0.1.0
+  version: 0.2.0
+  pillars:
+    - resilient
+    - sovereign
+    - scalable
+    - affordable
+    - alternative-to-foreign-fiat-stablecoins
 ---
 
 # Africa Oracle DevFlow — Project-Specific Skill
@@ -38,7 +44,7 @@ All ISO 3166-1 alpha-2 country codes, ISO 4217 currency codes. Reference rates b
 Default next item if no spec: extend test coverage or implement a real provider API (gated on keys). If user names a provider/country, the change must touch all three ports (py/go/sh) to keep them in sync OR explicitly note "py-only" in the commit.
 
 ### E — Evaluate
-Always run `py -3 -m pytest tests/ -v` (14 tests baseline). Grep for hardcoded paths matching `/storage/emulated/...` (PicoClaw legacy — should not exist post-v0.2.0). Audit shell scripts for `#!/bin/sh` + bash-isms (`local`, `RANDOM`, `[[ ]]`).
+Always run `py -3 -m pytest tests/ -v` (**20 tests baseline post-v0.3.0**). Grep for hardcoded paths matching `/storage/emulated/...` (PicoClaw legacy — should not exist post-v0.2.0). Audit shell scripts for `#!/bin/sh` + bash-isms (`local`, `RANDOM`, `[[ ]]`). Score against the **5 pillars + R²S²** gate (see below).
 
 ### Bl — Blueprint
 Update `AFRI_Blueprint.md` (not a generic Blueprint name). Preserve changelog; bump semver per: patch = fixes, minor = new endpoint/provider/deploy target, major = breaking schema change.
@@ -57,17 +63,24 @@ Never deploy without `py -3 -m pytest tests/ -v` green first.
 ### CI — Continuous Improve
 Run `I → Im → C → Bl` sequence. **Skip P + D in CI** unless explicitly requested — quality cycle does not auto-ship for a financial-rails project.
 
-## Quality gate (R²S²)
+## Quality gate (R²S² + 5 pillars)
 
-Every change passes:
+Every change passes the union of R²S² *and* the 5 pillars. **R²S²:**
 - **R**obust — graceful error path on all I/O
-- **R**eliable — pytest 14/14 green
+- **R**eliable — `py -3 -m pytest tests/ -v` is 20/20 green (was 14 pre-v0.3.0)
 - **S**olid — no half-implementations; gate real-API behind `NotImplementedError` if keys missing
-- **S**table — backwards-compatible API surface (`/health`, `/providers`, `/hunt`, `/feeds/all`)
+- **S**table — backwards-compatible API surface (`/health`, `/providers`, `/hunt`, `/feeds/all`, `/feeds/quorum`, `/feeds/stream`, `/metrics`)
 - **R**esistant — fail loud on `bc` errors, missing files, malformed input (no silent zeros)
-- **S**calable — ARM64 + amd64 multi-arch, no x86-only binary deps
-- **S**ecure — no hardcoded secrets, no shell injection via user-supplied provider/country (validated against PROVIDERS dict)
-- **S**ystematic — every change reflected in `AFRI_Blueprint.md` changelog
+- **S**calable — ARM64 + amd64 multi-arch, no x86-only binary deps, async I/O on aggregation paths
+- **S**ecure — no hardcoded secrets, no shell injection, Pydantic-validated inputs (`min_providers ∈ [1,4]`, `interval ∈ [5,300]`)
+- **S**ystematic — every change reflected in `AFRI_Blueprint.md` changelog + `EVAL_REPORT.md` score table
+
+**5 pillars (project-specific overlay):**
+- **Resilient** — quorum aggregation (≥2 providers per currency to publish); failed currencies surface in `quorum_failed`, never silent zero. Verify via `/feeds/quorum?min_providers=2` smoke test.
+- **Sovereign** — primary deploy region in `{jnb, cpt, nbo}`; no US-mandatory dependency; self-host path (`docker-compose.yml`) preserved on any infra change.
+- **Scalable** — new endpoints use `asyncio.to_thread` for blocking work; streaming endpoints emit SSE; counters are gauges or counters per Prometheus convention.
+- **Affordable** — no new runtime deps beyond `fastapi+uvicorn+pydantic+httpx`; image stays < 200 MB; CPU footprint fits shared-cpu-1x.
+- **Alternative** — every new feature is reviewed against the USDT/USDC comparison table in `SOVEREIGNTY.md`: does it widen AFRI's lead on settlement cost, jurisdictional control, or African mobile-money integration? If not, justify.
 
 ## Financial-math invariants
 
@@ -88,25 +101,38 @@ Every change passes:
 ```sh
 py -3 -m pip install -r requirements.txt pytest
 py -3 -m pytest tests/ -v
-# Expected: 14 passed in <0.5s
+# Expected: 20 passed in <2s
+#   14 core tests (provider mapping, simulation, aggregation)
+#    3 quorum tests (Resilient pillar)
+#    3 API endpoint tests (health/metrics, quorum, hunt-validation)
 ```
 
 ## Smoke recipe (post-deploy)
 
 ```sh
 URL="https://<deploy-url>"
+
+# Liveness + observability
 curl -s "$URL/health"
-# {"status":"ok","version":"0.2.0","providers":4}
+# {"status":"ok","version":"0.3.0","providers":4,"uptime_s":N}
+curl -s "$URL/metrics" | head -10  # Prometheus text format
 
-curl -s "$URL/providers" | head -20
-
+# Single feed
 curl -s -X POST "$URL/hunt" \
   -H 'Content-Type: application/json' \
   -d '{"provider":"mtn","country":"GH"}'
 
+# Aggregated (async parallel)
 curl -s -X POST "$URL/feeds/all" \
-  -H 'Content-Type: application/json' -d '{}' \
-  | head -20
+  -H 'Content-Type: application/json' -d '{}' | head -20
+
+# Resilient — quorum filter
+curl -s -X POST "$URL/feeds/quorum" \
+  -H 'Content-Type: application/json' \
+  -d '{"min_providers":2}' | jq '.currencies, .quorum_failed'
+
+# Scalable — SSE stream (Ctrl-C to stop)
+curl -N "$URL/feeds/stream?interval=10"
 ```
 
 ## Composite-command parsing
@@ -127,10 +153,18 @@ Execute the pipeline end-to-end without per-step confirmation. The composite inv
 devflow@1.1
   └── kafca (terse overlay)
        └── evo-metaclaw (distillation)
-            └── africa-oracle-devflow@0.1.0  ← this file
+            └── africa-oracle-devflow@0.1.0    (initial distillation)
+                 └── africa-oracle-devflow@0.2.0  ← this file (5-pillar fine-tune mutation)
 ```
 
-Bump version when: new deploy target added, provider list changes, R²S² gate criteria added, or test recipe changes.
+Bump version when: new deploy target added, provider list changes, R²S² gate criteria added, test recipe changes, OR pillar definition changes.
+
+## Mutation log
+
+| Version | Date | Mutation | Fitness signal |
+|---|---|---|---|
+| 0.1.0 | 2026-06-08 | Initial distillation from B+P+D+Bl+E+CI session — pre-loaded providers, ARM64 paths, R²S² | pending |
+| **0.2.0** | **2026-06-08** | **5-pillar overlay added to R²S² gate; test baseline 14 → 20; API surface extended with `/feeds/quorum` + `/feeds/stream` + `/metrics`; `SOVEREIGNTY.md` referenced** | **0.88 (5-pillar avg)** |
 
 ---
-*Distilled 2026-06-08 from a B+P+D+Bl+E+CI session. Source genome: `devflow@1.1`. Fitness: pending.*
+*Distilled 2026-06-08 from a B+P+D+Bl+CI+E session. Source genome: `africa-oracle-devflow@0.1.0`. Fitness: 0.88.*

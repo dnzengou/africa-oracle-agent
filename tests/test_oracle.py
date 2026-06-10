@@ -106,3 +106,79 @@ def test_aggregator_volume_weighted_spread_in_range():
     out = agg.aggregate()
     ngn = next(c for c in out["prices"] if c["currency"] == "NGN")
     assert 0 < ngn["spread"] < 0.05  # < 5%
+
+
+# ─── Quorum (Resilient pillar) ───────────────────────────────────────────────
+
+
+def test_quorum_drops_single_provider_currencies():
+    """A currency with only one provider must NOT pass quorum=2."""
+    agg = OracleAggregator()
+    agg.add_agent(OracleAgent("mtn", "NG"))  # NGN only on mtn → 1 provider
+    agg.add_agent(OracleAgent("safaricom", "KE"))
+    agg.add_agent(OracleAgent("airtel", "KE"))  # KES has 2 providers
+    out = agg.quorum_aggregate(min_providers=2)
+    currencies_passed = {p["currency"] for p in out["prices"]}
+    currencies_failed = {p["currency"] for p in out["quorum_failed"]}
+    assert "KES" in currencies_passed
+    assert "NGN" in currencies_failed
+    assert out["quorum_threshold"] == 2
+
+
+def test_quorum_one_admits_everything():
+    agg = OracleAggregator()
+    agg.add_agent(OracleAgent("mtn", "NG"))
+    out = agg.quorum_aggregate(min_providers=1)
+    assert len(out["prices"]) == 1
+    assert out["quorum_failed"] == []
+
+
+def test_quorum_empty_input():
+    out = OracleAggregator().quorum_aggregate(min_providers=2)
+    assert "error" in out
+
+
+# ─── FastAPI endpoint smoke (Resilient + Scalable + Affordable) ─────────────
+
+
+def test_api_health_and_metrics():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+
+    r = client.get("/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["providers"] == 4
+
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "africa_oracle_info" in r.text
+    assert 'version="' in r.text
+
+
+def test_api_quorum_endpoint():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/feeds/quorum", json={"min_providers": 2})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["quorum_threshold"] == 2
+    assert isinstance(body["prices"], list)
+    assert isinstance(body["quorum_failed"], list)
+
+
+def test_api_hunt_rejects_unknown_provider():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/hunt", json={"provider": "zelle", "country": "US"})
+    assert r.status_code == 400

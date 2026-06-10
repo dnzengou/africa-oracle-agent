@@ -239,6 +239,31 @@ class OracleAggregator:
             "raw_feeds": prices,  # In production: omit for efficiency
         }
 
+    def quorum_aggregate(self, min_providers: int = 2) -> dict:
+        """Resilient variant of aggregate() — only publishes prices for currencies
+        where at least `min_providers` distinct providers reported. Currencies that
+        fail quorum are dropped from `prices` but listed in `quorum_failed` so the
+        consumer can detect a partition (e.g. M-Pesa outage in KE)."""
+        base = self.aggregate()
+        if "prices" not in base:
+            return base
+        passed, failed = [], []
+        for p in base["prices"]:
+            distinct = len(set(p["providers"]))
+            (passed if distinct >= min_providers else failed).append(
+                {**p, "distinct_providers": distinct}
+            )
+        return {
+            **base,
+            "quorum_threshold": min_providers,
+            "currencies": len(passed),
+            "prices": passed,
+            "quorum_failed": [
+                {"currency": p["currency"], "distinct_providers": p["distinct_providers"]}
+                for p in failed
+            ],
+        }
+
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 

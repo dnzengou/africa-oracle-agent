@@ -47,3 +47,63 @@
 - **Scalable:** ✅ ARM64 + multi-arch image ready
 - **Secure:** ✅ no secrets, no injection vectors
 - **Systematic:** ✅ blueprint, tests, CI workflow in place
+
+---
+
+# v0.3.0 Re-evaluation — 5-pillar fine-tune — 2026-06-08
+
+## Pillar scoring
+
+### Resilient — **9 / 10**
+- ✅ `OracleAggregator.quorum_aggregate(min_providers=2)` drops currencies without quorum into `quorum_failed` (not silent zero, not stale value). Verified by `test_quorum_drops_single_provider_currencies`.
+- ✅ `/feeds/quorum` endpoint exposes the resilient path with configurable threshold.
+- ✅ Polyglot ports (py/go/sh) survive any single runtime failure.
+- ⚠ -1: No external timeout (real `_real_fetch` still NotImplementedError, so N/A today; flag for Phase 1).
+
+### Sovereign — **8 / 10**
+- ✅ `SOVEREIGNTY.md` published; 5 pillars + USDT/USDC comparison table documented.
+- ✅ `docker-compose.yml` self-host path enables any African VPS operator to run independently.
+- ✅ Primary deploy region `jnb`; no US-mandatory dependency in `fly.toml` or workflow.
+- ✅ No PII handled at the oracle boundary.
+- ⚠ -2: GHCR (US-hosted) is a transport layer; full sovereignty would mirror to an African registry. Document as Phase-1 follow-up.
+
+### Scalable — **9 / 10**
+- ✅ `feeds/all` and `feeds/quorum` use `asyncio.to_thread` → event loop stays responsive under load.
+- ✅ `/feeds/stream` SSE endpoint shifts consumers from poll to push; linear cost in connections.
+- ✅ Stateless API → horizontal scale is `fly scale count N`.
+- ✅ Multi-arch image (amd64 + arm64) covers cloud + edge.
+- ⚠ -1: In-process Prometheus counters are not multi-worker safe. Acceptable on single-machine; flag for >1 machine deploy.
+
+### Affordable — **10 / 10**
+- ✅ Image deps: fastapi + uvicorn + pydantic + httpx. No Redis, no Postgres, no APM agent.
+- ✅ `docker-compose.yml` runs on a $4–6/mo VPS with 512 MB RAM.
+- ✅ `fly.toml` shared-cpu-1x = free-tier viable.
+- ✅ POSIX shell port runs on $35 Raspberry Pi.
+- ✅ SSE removes per-poll HTTP overhead for high-frequency consumers.
+
+### Alternative (to USDT/USDC) — **8 / 10**
+- ✅ Comparison table in `SOVEREIGNTY.md` documents 8 axes where AFRI beats foreign fiat-backed stablecoins on African settlement.
+- ✅ On-chain collateral ratio query (`get_collateral_ratio`) > quarterly attestation.
+- ✅ Telegram-via-TON integration is unique among major stablecoins.
+- ⚠ -2: Live AFRI Jetton not yet on TON testnet (FunC scaffold needs TIP-74 rewrite); the value prop is documented, not yet shipped.
+
+## R²S² gate — v0.3.0
+- **Robust:** ✅ quorum aggregation; bcq helper; graceful 4xx/501 in API
+- **Reliable:** ✅ 20/20 tests pass (added 6 for quorum + endpoints)
+- **Solid:** ⚠ FunC contract still scaffold (P1-5/6/7 unchanged from v0.2.0)
+- **Stable:** ✅ API surface additive only (`/feeds/quorum`, `/feeds/stream`, `/metrics`); no breaking changes
+- **Resistant:** ✅ Quorum threshold protects against single-provider compromise
+- **Scalable:** ✅ async + SSE + multi-arch + stateless
+- **Secure:** ✅ Pydantic validation on `min_providers ∈ [1,4]` and `interval ∈ [5,300]`; no shell injection
+- **Systematic:** ✅ Blueprint v0.3.0 changelog + SOVEREIGNTY.md + lineage in skill artifact
+
+## Scores roll-up
+
+| Axis | v0.2.0 | v0.3.0 | Δ |
+|---|---|---|---|
+| Security | 9 | 9 | – |
+| Correctness | 8 | 9 | +1 (quorum tested) |
+| Performance | 8 | 9 | +1 (async + SSE) |
+| Quality | 8 | 9 | +1 (sovereignty docs) |
+| **5-pillar avg** | – | **8.8** | new |
+
