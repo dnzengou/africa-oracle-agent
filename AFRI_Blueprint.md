@@ -1,5 +1,5 @@
 # AFRI Africa Oracle — Project Blueprint
-**Version:** 0.3.0 · **Date:** 2026-06-08 · **Deploy:** [pending]
+**Version:** 0.3.1 · **Date:** 2026-06-08 · **Deploy:** [pending]
 
 ## Value proposition
 
@@ -144,6 +144,13 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 
 ## Changelog
 
+### v0.3.1 — 2026-06-08
+**Consolidation pass (Bl+E+CI+evolve) — no new features, drift correction:**
+- `README.md` rewritten from v0.1.0-vintage to v0.3.0-current: 5-pillar value prop, current API surface (`/feeds/quorum`, `/feeds/stream`, `/metrics`), all four deploy paths, free-tier cost note, badges.
+- `EVAL_REPORT.md` extended with v0.3.1 Consolidation Audit section (drift findings P1-D1, P3-D1, P2-D1).
+- `skills/africa-oracle-devflow.md` bumped v0.2.0 → v0.3.0: Bl rule extended to enforce README-as-public-truth; polyglot-drift policy formalized (quorum is Python-only by design — Go/Sh are single-feed extractors; quorum is a server concern); FunC scope-out hardened (now flagged in 3 consecutive ships → dedicated session recommended).
+- No code change; no test count change (20/20 still green); no API change.
+
 ### v0.3.0 — 2026-06-08
 **Build (B) — 5-pillar fine-tune:**
 - Added `OracleAggregator.quorum_aggregate(min_providers)` — Resilient pillar (single-provider outages no longer move the rate; failed currencies surface in `quorum_failed`)
@@ -190,4 +197,4 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - Bridge + deploy shell harnesses
 
 ---
-*AFRI Africa Oracle · v0.3.0 · 2026-06-08*
+*AFRI Africa Oracle · v0.3.1 · 2026-06-08*

@@ -1,14 +1,14 @@
 ---
 name: africa-oracle-devflow
-description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads provider config, ARM64 deploy targets, 5-pillar value prop (Resilient/Sovereign/Scalable/Affordable/Alternative), R²S² gate, and known scope boundaries. Trigger on any composite DevFlow command (B, P, D, Bl, E, CI, Im, C, I or combinations) when working in this repo.
+description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads provider config, ARM64 deploy targets, 5-pillar value prop (Resilient/Sovereign/Scalable/Affordable/Alternative), R²S² gate, polyglot-drift policy, and known scope boundaries. Trigger on any composite DevFlow command (B, P, D, Bl, E, CI, Im, C, I or combinations) when working in this repo.
 metadata:
   type: skill
   parent: devflow@1.1
-  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0]
-  evolved_from: 2026-06-08 5-pillar fine-tune session
-  fitness: 0.88  # 5-pillar avg score post-v0.3.0
+  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0]
+  evolved_from: 2026-06-08 v0.3.1 consolidation pass
+  fitness: 0.90  # +0.02 vs v0.2.0 — public-facing docs now consistent with internal
   niche: phase-0-stablecoin-oracle
-  version: 0.2.0
+  version: 0.3.0
   pillars:
     - resilient
     - sovereign
@@ -41,13 +41,13 @@ All ISO 3166-1 alpha-2 country codes, ISO 4217 currency codes. Reference rates b
 ## Command overrides (vs generic DevFlow)
 
 ### B — Build
-Default next item if no spec: extend test coverage or implement a real provider API (gated on keys). If user names a provider/country, the change must touch all three ports (py/go/sh) to keep them in sync OR explicitly note "py-only" in the commit.
+Default next item if no spec: extend test coverage or implement a real provider API (gated on keys). Polyglot scope rule (see "Polyglot drift policy" below): provider/country/currency tables must stay in sync across py/go/sh ports; everything else may diverge with rationale.
 
 ### E — Evaluate
 Always run `py -3 -m pytest tests/ -v` (**20 tests baseline post-v0.3.0**). Grep for hardcoded paths matching `/storage/emulated/...` (PicoClaw legacy — should not exist post-v0.2.0). Audit shell scripts for `#!/bin/sh` + bash-isms (`local`, `RANDOM`, `[[ ]]`). Score against the **5 pillars + R²S²** gate (see below).
 
 ### Bl — Blueprint
-Update `AFRI_Blueprint.md` (not a generic Blueprint name). Preserve changelog; bump semver per: patch = fixes, minor = new endpoint/provider/deploy target, major = breaking schema change.
+Update `AFRI_Blueprint.md` (not a generic Blueprint name). Preserve changelog; bump semver per: patch = fixes, minor = new endpoint/provider/deploy target, major = breaking schema change. **Also check `README.md`** — it is the public-facing truth and must agree with Blueprint + SOVEREIGNTY + DEPLOY on: value prop, API surface, supported providers, deploy targets, and test count. If they diverge, README is the one that's wrong (it was stale through v0.2.0 and v0.3.0 ships).
 
 ### P — Push
 First-time: no remote configured. Suggest `gh repo create africa-oracle-agent --public --source=. --remote=origin --push` rather than guessing. Commit prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `security:` (no Conventional Commit body required, but include Co-Authored-By Claude).
@@ -91,10 +91,22 @@ Every change passes the union of R²S² *and* the 5 pillars. **R²S²:**
 
 ## Scoped out (do not implement without explicit request)
 
-- **FunC contract rewrite** — `afri-token.fc` is scaffold-quality, has TIP-74 stdlib mismatches (`parse_std_addr?` is wrong idiom; function declarations use non-FunC syntax). Tracked in `EVAL_REPORT.md` P1-5/6/7.
+- **FunC contract rewrite** — `afri-token.fc` is scaffold-quality, has TIP-74 stdlib mismatches (`parse_std_addr?` is wrong idiom; function declarations use non-FunC syntax). Tracked in `EVAL_REPORT.md` P1-5/6/7. Has been flagged in v0.2.0, v0.3.0, v0.3.1; needs its own dedicated session.
 - **Real provider API integration** — gated on M-Pesa Daraja / Airtel Money / Orange Money / MTN MoMo API access + KYC. Don't fake it.
-- **WebSocket streaming feed** — Phase 0 is HTTP poll only; WS is roadmap Phase 1.
 - **Outlier detection (Tukey fence)** — roadmap.
+- **African-mirror image registry** — replace GHCR as primary distribution. Roadmap Phase 1 sovereignty work.
+
+## Polyglot drift policy
+
+The three ports (py/go/sh) are **not** required to be feature-equivalent. Roles:
+
+| Port | Role | Must stay in sync on | May diverge on |
+|---|---|---|---|
+| `oracle_agent.py` | Canonical implementation; serves the HTTP API via `api/app.py` | provider/country/currency tables · `simulate` algorithm shape · field names in `PriceFeed` | server-side concerns (aggregation, quorum, async, SSE) |
+| `oracle_agent.go` | Edge-perf single-feed extraction | provider/country/currency tables · field names in `PriceFeed` | server endpoints · async runtime |
+| `oracle_agent.sh` | PicoClaw / Raspberry Pi edge | provider/country/currency tables · field names | everything else |
+
+**Rule:** Quorum aggregation lives only in Python because it's a server-side aggregation concern. The Go and shell ports publish single feeds; quorum is computed downstream by whoever consumes them. Do NOT add `quorum_aggregate` to Go or shell without a new requirement that justifies it (e.g. self-contained edge node that publishes a quorum-aggregated feed without a Python server). Document any port-divergence in the commit message.
 
 ## Test recipe
 
@@ -164,7 +176,8 @@ Bump version when: new deploy target added, provider list changes, R²S² gate c
 | Version | Date | Mutation | Fitness signal |
 |---|---|---|---|
 | 0.1.0 | 2026-06-08 | Initial distillation from B+P+D+Bl+E+CI session — pre-loaded providers, ARM64 paths, R²S² | pending |
-| **0.2.0** | **2026-06-08** | **5-pillar overlay added to R²S² gate; test baseline 14 → 20; API surface extended with `/feeds/quorum` + `/feeds/stream` + `/metrics`; `SOVEREIGNTY.md` referenced** | **0.88 (5-pillar avg)** |
+| 0.2.0 | 2026-06-08 | 5-pillar overlay added to R²S² gate; test baseline 14 → 20; API surface extended with `/feeds/quorum` + `/feeds/stream` + `/metrics`; `SOVEREIGNTY.md` referenced | 0.88 (5-pillar avg) |
+| **0.3.0** | **2026-06-08** | **Bl rule extended to enforce README.md consistency with Blueprint + SOVEREIGNTY + DEPLOY (README was stale through v0.2.0/v0.3.0 ships); polyglot-drift policy formalized (quorum is Python-only by design); FunC scope-out hardened (third repeated flag → dedicated session)** | **0.90 (public-facing docs now consistent)** |
 
 ---
-*Distilled 2026-06-08 from a B+P+D+Bl+CI+E session. Source genome: `africa-oracle-devflow@0.1.0`. Fitness: 0.88.*
+*Evolved 2026-06-08 from a Bl+E+CI+evolve consolidation pass. Source genome: `africa-oracle-devflow@0.2.0`. Fitness: 0.90.*

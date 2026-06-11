@@ -107,3 +107,33 @@
 | Quality | 8 | 9 | +1 (sovereignty docs) |
 | **5-pillar avg** | – | **8.8** | new |
 
+---
+
+# v0.3.1 Consolidation Audit — 2026-06-08
+
+Bl+E+CI+evolve consolidation pass. No new features; drift + doc consistency.
+
+## Drift findings
+
+- **P1-D1 — README.md (pre-fix)** was at v0.1.0 vintage: no value-prop section, no quorum, no SSE, no SOVEREIGNTY.md link, "Status: Planned" for all providers, "Cost: ~$5K/month" without "free-tier viable today" context. Public-facing doc contradicted the v0.3.0 ship. **Fixed:** rewritten against the 5 pillars, v0.3.0 API surface, all four deploy paths, badges, free-tier cost note.
+- **P3-D1 — Polyglot drift on quorum** (deliberate, documented): `oracle_agent.go` and `oracle_agent.sh` do NOT carry `quorum_aggregate`. Python remains canonical for aggregation. Go = edge perf for single-feed extraction; Sh = PicoClaw edge for the same. Quorum is a server-side concern handled by the FastAPI layer, which only the Python port serves. **Action:** none — flag as scope clarification in `skills/africa-oracle-devflow.md` v0.3.0.
+- **P2-D1 — CI workflow** correctly installs `httpx` via `pip install -r requirements.txt pytest`. No action.
+- **P1-5/6/7 — FunC contract** unchanged scaffold (raised v0.2.0, v0.3.0, v0.3.1). Should not block further oracle work. Recommend spawning a dedicated session to rewrite `afri-token.fc` against TIP-74 stdlib.
+
+## R²S² gate — v0.3.1
+
+- **Robust:** ✅ unchanged from v0.3.0
+- **Reliable:** ✅ 20/20 tests still pass; no test added/removed
+- **Solid:** ⚠ unchanged (FunC scaffold)
+- **Stable:** ✅ no behaviour change in this consolidation
+- **Resistant:** ✅ unchanged
+- **Scalable:** ✅ unchanged
+- **Secure:** ✅ unchanged
+- **Systematic:** ✅ README now matches Blueprint + SOVEREIGNTY + DEPLOY — public-facing surface consistent with internal docs
+
+## What was committed in v0.3.1
+
+- README.md rewritten v0.1.0-vintage → v0.3.0-current (5 pillars, quorum, SSE, badges, deploy matrix)
+- EVAL_REPORT.md: this section
+- skills/africa-oracle-devflow.md: bumped v0.2.0 → v0.3.0 with polyglot-drift acknowledgement + README-as-public-truth rule
+
