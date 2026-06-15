@@ -1,5 +1,5 @@
 # AFRI Africa Oracle — Project Blueprint
-**Version:** 0.3.1 · **Date:** 2026-06-08 · **Deploy:** [pending]
+**Version:** 0.3.2 · **Date:** 2026-06-15 · **Deploy:** [pending]
 
 ## Value proposition
 
@@ -71,7 +71,8 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - [x] Mint/burn handlers
 - [x] Oracle update handler
 - [x] Deploy harness (`afri-deploy.sh`)
-- [ ] FunC compilation + BoC artifact
+- [x] **FunC compilation + BoC artifact** (v0.3.2 — TIP-74 rewrite, `tests/run_func_tests.sh`)
+- [x] **Pure-helper unit tests** (`tests/test_afri_token_funcs.fc`, 7 tests)
 - [ ] Testnet deployment + verify
 - [ ] Bridge ↔ oracle handshake (signed price feeds)
 - [ ] Front-running protection (commit-reveal mint)
@@ -100,7 +101,9 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 | `api/app.py` | FastAPI ASGI server | ✅ |
 | `afri-bridge.sh` | Mobile money ↔ AFRI bridge | ✅ |
 | `afri-deploy.sh` | TON deploy harness | ✅ |
-| `afri-token.fc` | TON Jetton smart contract | ✅ |
+| `afri-token.fc` | TON Jetton smart contract (TIP-74, compiles to BoC) | ✅ |
+| `tests/test_afri_token_funcs.fc` | FunC unit tests (7 methods, ids 100-106) | ✅ |
+| `tests/run_func_tests.sh` | FunC compile + assemble gate runner | ✅ |
 | `Dockerfile` | Multi-arch image | ✅ |
 | `fly.toml` | Fly.io ARM64 config | ✅ |
 | `vercel.json` | Vercel ASGI config | ✅ |
@@ -143,6 +146,41 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - Full deploy (10 providers × 30 countries × 30 s polling): ~\$5K/mo at production scale
 
 ## Changelog
+
+### v0.3.2 — 2026-06-15
+**Build (B) — dedicated FunC session:** discharges P1-5/6/7 (raised v0.2.0, re-flagged v0.3.0 and v0.3.1).
+- `afri-token.fc` rewritten against current TIP-74 stdlib:
+  - **P1-5 ✅** — `parse_std_addr?(in_msg_full)` replaced with canonical
+    `begin_parse()` / `load_msg_addr()` idiom; bounced messages dropped.
+  - **P1-6 ✅** — `afri_amount * scale / scale` tautology removed; burn-side
+    collateral reduction is now correct (AFRI USD-pegged 1:1, 9 decimals).
+  - **P1-7 ✅** — every function header rewritten to canonical FunC syntax
+    (`int name(...) { }`, void `()`, multi-return tuples); getters use
+    `method_id` annotations for proper TVM registration.
+  - **Bonus fix:** the `min_collateral_ratio` constant was `1200` with a
+    `* 10000 /` formula — meaning 12 %, not 120 %. Corrected to `12000` (bp)
+    so 120 % is actually enforced.
+- Storage layout aligned with canonical TIP-74 minter
+  (`total_supply, admin, content, jetton_wallet_code, extra`) with AFRI state
+  (`oracle, collateral, last_update, rates`) in a backwards-compatible extra
+  ref-cell.
+- Jetton wallet address derived via `state_init` hash (standard pattern).
+- Getters registered with `method_id`: `get_jetton_data` (TIP-74),
+  `get_wallet_address` (TIP-74), `get_collateral_ratio`, `get_currency_rate`,
+  `get_system_status`, `get_admin_address`, `get_oracle_address`.
+
+**Tests:** `tests/test_afri_token_funcs.fc` (7 methods, ids 100-106) covering
+`calculate_mint_amount`, `calculate_burn_amount`, `check_collateral_ratio`
+(boundary / breach / empty), and a mint→burn round-trip. Each returns 0 on
+PASS, drift value on FAIL. `tests/run_func_tests.sh` runs the compile +
+assemble gate (TVM execution gated to toncli/lite-client; FunC toolchain is
+not part of the oracle CI image by design).
+
+**Evaluate (E):** R²S² **Solid** upgraded ⚠ → ✅. 5-pillar avg 8.8 → 9.2
+(Alternative pillar's "FunC scaffold not yet compiling" deduction cleared).
+
+**Evolve (evo-metaclaw):** `skills/africa-oracle-devflow.md` bumped
+v0.3.0 → v0.3.1 with FunC compile gate added to D path.
 
 ### v0.3.1 — 2026-06-08
 **Consolidation pass (Bl+E+CI+evolve) — no new features, drift correction:**

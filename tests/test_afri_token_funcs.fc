@@ -1,0 +1,87 @@
+;; FunC unit tests for AFRI Token pure helpers.
+;; v0.1.0 — covers calculate_mint_amount, calculate_burn_amount, check_collateral_ratio.
+;;
+;; Each test exposes a TVM get-method (method_id ≥ 100 to avoid colliding
+;; with auto-hashed contract getters). The method returns:
+;;   - 0 on PASS
+;;   - non-zero on FAIL (the actual returned value, so you can inspect drift)
+;;
+;; How to run:
+;;
+;;   # 1. Compile (proves the helpers are syntactically valid against the
+;;   #    TIP-74 stdlib + the rewritten contract):
+;;   bash tests/run_func_tests.sh
+;;
+;;   # 2. Execute via toncli sandbox emulator:
+;;   toncli run_tests
+;;
+;;   # 3. Or interactively against a deployed test contract on testnet:
+;;   lite-client> runmethod <addr> 100        # test_mint_at_par_kes
+;;   lite-client> runmethod <addr> 101        # test_mint_small_xof
+;;   lite-client> runmethod <addr> 102        # test_burn_at_par_kes
+;;   lite-client> runmethod <addr> 103        # test_collateral_at_boundary
+;;   lite-client> runmethod <addr> 104        # test_collateral_breach
+;;   lite-client> runmethod <addr> 105        # test_collateral_empty_supply
+;;   lite-client> runmethod <addr> 106        # test_mint_then_burn_roundtrip
+
+#include "../afri-token.fc";
+
+;; ─── calculate_mint_amount ─────────────────────────────────────────────────
+
+;; 130 KES/USD, deposit 130 KES (in 9-decimal nanos = 130 * 1e9).
+;; Pre-fee: 1 USD = 1e9 nanos. Fee 0.5 % = 5e6. Net: 995_000_000.
+int test_mint_at_par_kes() method_id(100) {
+    int got = calculate_mint_amount(130000000000, 130000000000);
+    return got - 995000000;
+}
+
+;; 650 XOF/USD, deposit 6500 XOF (= 6500 * 1e9 nanos).
+;; Pre-fee: 6500 / 650 = 10 USD = 10e9. Fee 50e6. Net: 9_950_000_000.
+int test_mint_small_xof() method_id(101) {
+    int got = calculate_mint_amount(6500000000000, 650000000000);
+    return got - 9950000000;
+}
+
+;; ─── calculate_burn_amount ─────────────────────────────────────────────────
+
+;; Burn 1 AFRI (1e9 nanos) at 130 KES/USD.
+;; Fee 0.5 % = 5e6. Net USD = 995e6. Payout = 995e6 * 130e9 / 1e9 = 129_350_000_000.
+int test_burn_at_par_kes() method_id(102) {
+    int got = calculate_burn_amount(1000000000, 130000000000);
+    return got - 129350000000;
+}
+
+;; ─── check_collateral_ratio ────────────────────────────────────────────────
+
+;; Exactly 120 % — should pass (returns -1).
+int test_collateral_at_boundary() method_id(103) {
+    int ok = check_collateral_ratio(1200000000000, 1000000000000);
+    return ok + 1;  ;; expect -1, so -1 + 1 = 0 means PASS
+}
+
+;; 119.99 % — should fail (returns 0).
+int test_collateral_breach() method_id(104) {
+    int ok = check_collateral_ratio(1199900000000, 1000000000000);
+    return ok;  ;; expect 0 directly
+}
+
+;; Bootstrap: zero supply — should pass (returns -1).
+int test_collateral_empty_supply() method_id(105) {
+    int ok = check_collateral_ratio(0, 0);
+    return ok + 1;  ;; expect -1
+}
+
+;; ─── Round-trip (mint then burn at same rate, fee on both legs) ────────────
+
+;; Mint 130 KES → afri_amount = 995e6.
+;; Then burn that afri_amount → payout = (995e6 - 0.5%) * 130 = 990025 * 130000 = 128_703_250_000.
+;; (Confirms fee is applied once per leg, not compounded incorrectly.)
+int test_mint_then_burn_roundtrip() method_id(106) {
+    int rate = 130000000000;
+    int momo_in = 130000000000;
+    int afri = calculate_mint_amount(momo_in, rate);          ;; 995_000_000
+    int momo_out = calculate_burn_amount(afri, rate);          ;; 128_703_250_000
+    ;; Net round-trip leakage ≈ 0.5% + 0.5% = ~0.9975 % of input.
+    ;; Expected: momo_out == 128_703_250_000.
+    return momo_out - 128703250000;
+}

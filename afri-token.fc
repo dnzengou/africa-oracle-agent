@@ -1,275 +1,422 @@
-;; AFRI Token — TON Jetton (TIP-74) with Mobile Money Collateral Bridge
-;; v0.1.0 — African Digital Money Stablecoin
+;; AFRI Token — TON Jetton Minter (TIP-74)
+;; v0.2.0 — Compile-clean rewrite against current FunC + TIP-74 stdlib.
 ;;
-;; Architecture:
-;;   - Standard TON Jetton (TIP-74 compliant)
-;;   - 120% over-collateralization with mobile money reserves
-;;   - Mint: deposit mobile money → verify via oracle → mint AFRI
-;;   - Burn: burn AFRI → release mobile money collateral
-;;   - Oracle price feed from synthetic USD/Africa index
+;; Fixes (vs v0.1.0 scaffold, per EVAL_REPORT.md):
+;;   P1-5: replace non-existent parse_std_addr?(in_msg_full) with the canonical
+;;         in_msg_full.begin_parse() / load_msg_addr() idiom.
+;;   P1-6: remove the `afri_amount * scale / scale` tautology; the on-chain
+;;         collateral is reduced by the AFRI burn amount directly (AFRI is
+;;         USD-pegged 1:1, both expressed in 9 decimals).
+;;   P1-7: rewrite all `() name(...) returns int` headers to FunC syntax
+;;         `int name(...) { ... }`. Bool returns use FunC convention (-1/0).
+;;   New : proper TIP-74 storage layout, `method_id` annotations on getters,
+;;         jetton wallet address calculation via state_init hash, and a
+;;         backwards-compatible `extra` ref-cell for AFRI-specific state
+;;         (oracle, collateral total, last update, rates dict).
 ;;
-;; Collateral ratio: 120% minimum
-;; Mint fee: 0.5%
-;; Burn fee: 0.5%
-;; Supported currencies: KES, UGX, TZS, RWF, XOF, XAF
+;; Semantics preserved from v0.1.0:
+;;   - 120 % min collateral ratio (basis points: 12000)
+;;   - 0.5 % mint + burn fee (basis points: 50)
+;;   - 6 currencies: KES, UGX, TZS, RWF, XOF, XAF (8-bit code 0..5)
+;;
+;; Storage TL-B:
+;;   storage#_ total_supply:Coins admin_address:MsgAddress
+;;             content:^Cell jetton_wallet_code:^Cell
+;;             extra:^Cell = Storage;
+;;   extra#_ oracle_address:MsgAddress total_collateral_usd:Coins
+;;           last_update:uint32 rates:^Cell = Extra;
+;;
+;; Rate semantics: rate = local_currency_per_USD * scale (9 decimals).
+;;                 e.g. 130 KES/USD → rate = 130 * 1_000_000_000.
 
-;; ─── Constants ───────────────────────────────────────────────────────────────
+#include "stdlib.fc";
 
-;; Minimum collateral ratio (120% = 1.2, stored as integer 1200 basis points)
-const min_collateral_ratio: int = 1200;
+;; ─── Constants ──────────────────────────────────────────────────────────────
 
-;; Fee rate (0.5% = 50 basis points)
-const fee_bp: int = 50;
+const int min_collateral_ratio = 12000;   ;; 120 % expressed in basis points
+const int fee_bp                = 50;     ;; 0.5 %
+const int basis_bp              = 10000;  ;; 100 %
+const int scale                 = 1000000000;  ;; 9 decimals
 
-;; Scale factor for decimal precision
-const scale: int = 1000000000;  ; 9 decimals
+const int CURRENCY_KES = 0;
+const int CURRENCY_UGX = 1;
+const int CURRENCY_TZS = 2;
+const int CURRENCY_RWF = 3;
+const int CURRENCY_XOF = 4;
+const int CURRENCY_XAF = 5;
+const int MAX_CURRENCY = 5;
 
-;; Supported currency codes (as integers)
-const CURRENCY_KES: int = 0;
-const CURRENCY_UGX: int = 1;
-const CURRENCY_TZS: int = 2;
-const CURRENCY_RWF: int = 3;
-const CURRENCY_XOF: int = 4;
-const CURRENCY_XAF: int = 5;
+;; TIP-74 standard op codes
+const int op::transfer              = 0xf8a7ea5;
+const int op::transfer_notification = 0x7362d09c;
+const int op::internal_transfer     = 0x178d4519;
+const int op::excesses              = 0xd53276db;
+const int op::burn                  = 0x595f07bc;
+const int op::burn_notification     = 0x7bdd97de;
 
-;; ─── Storage ─────────────────────────────────────────────────────────────────
+;; AFRI custom op codes
+const int op::mint           = 21;
+const int op::change_admin   = 3;
+const int op::change_content = 4;
+const int op::update_oracle  = 0xa1f10001;
+const int op::update_rates   = 0xa1f10002;
 
-;; Jetton wallet storage
-;; owner_address: MsgAddress
-;; balance: int (AFRI tokens, 9 decimals)
-;; total_minted: int
-;; total_burned: int
+;; Error codes
+const int error::not_admin          = 73;
+const int error::not_oracle         = 74;
+const int error::invalid_op         = 0xffff;
+const int error::invalid_currency   = 0xfff1;
+const int error::no_rate            = 1001;
+const int error::amount_too_small   = 1002;
+const int error::collateral_breach  = 1003;
+const int error::wallet_mismatch    = 1004;
 
-;; Collateral storage per currency
-;; collateral[currency_code] = { amount: int, depositors: dict<address, int> }
+;; Send modes
+const int send_mode::pay_fees_separately = 1;
 
-;; Oracle storage
-;; oracle_address: MsgAddress
-;; rates[currency_code] = int (USD rate * scale)
-;; last_update: int (unix timestamp)
+;; ─── Pure helpers (covered by tests/test_afri_token_funcs.fc) ───────────────
 
-;; ─── Messages ────────────────────────────────────────────────────────────────
-
-;; Mint: user sends mobile money ref + currency + amount
-;; Internal message with op::mint
-;;   sender: user address
-;;   currency: int (currency code)
-;;   momo_amount: int (mobile money amount in smallest unit)
-;;   momo_ref: string (transaction reference)
-;;   expected_afri: int (expected AFRI amount, for slippage protection)
-
-;; Burn: user burns AFRI for mobile money payout
-;; Internal message with op::burn
-;;   sender: user address
-;;   amount: int (AFRI tokens to burn, 9 decimals)
-;;   momo_number: string (mobile money number for payout)
-
-;; Oracle update: oracle updates price feed
-;; Internal message with op::update_rates
-;;   sender: oracle address (must match stored oracle)
-;;   rates: tuple of (currency, rate) pairs
-
-;; ─── Core Logic ──────────────────────────────────────────────────────────────
-
-;; Calculate AFRI to mint from mobile money deposit
-;; momo_amount: mobile money amount in local currency
-;; rate: USD/local currency rate
-;; Returns: AFRI amount (9 decimals)
-() calculate_mint_amount(int momo_amount, int rate) returns int {
-    ;; Convert to USD equivalent
+;; Calculate AFRI to mint from a mobile-money deposit, net of 0.5 % fee.
+;; momo_amount: local currency smallest unit (9-decimal nanos)
+;; rate       : local_per_usd * scale (9 decimals)
+;; Returns AFRI amount (9 decimals).
+int calculate_mint_amount(int momo_amount, int rate) inline {
     int usd_value = momo_amount * scale / rate;
-    
-    ;; Apply 0.5% mint fee
-    int fee = usd_value * fee_bp / 10000;
-    int net = usd_value - fee;
-    
-    return net;
+    int fee = usd_value * fee_bp / basis_bp;
+    return usd_value - fee;
 }
 
-;; Calculate mobile money payout from AFRI burn
-;; afri_amount: AFRI tokens to burn (9 decimals)
-;; rate: USD/local currency rate
-;; Returns: mobile money amount in local currency
-() calculate_burn_amount(int afri_amount, int rate) returns int {
-    ;; Convert AFRI to USD
-    int usd_value = afri_amount;
-    
-    ;; Apply 0.5% burn fee
-    int fee = usd_value * fee_bp / 10000;
-    int net = usd_value - fee;
-    
-    ;; Convert to local currency
-    int local_amount = net * rate / scale;
-    
-    return local_amount;
+;; Calculate mobile-money payout from an AFRI burn, net of 0.5 % fee.
+;; afri_amount: AFRI tokens (9 decimals); USD-pegged 1:1
+;; rate       : local_per_usd * scale (9 decimals)
+;; Returns local currency smallest unit (9-decimal nanos).
+int calculate_burn_amount(int afri_amount, int rate) inline {
+    int fee = afri_amount * fee_bp / basis_bp;
+    int net_usd = afri_amount - fee;
+    return net_usd * rate / scale;
 }
 
-;; Check collateral ratio
-;; total_collateral_usd: total USD value of all collateral
-;; total_supply: total AFRI tokens in circulation
-;; Returns: true if ratio >= minimum
-() check_collateral_ratio(int total_collateral_usd, int total_supply) returns bool {
-    if (total_supply == 0) {
-        return true;
-    }
-    
-    ;; ratio = total_collateral_usd * 10000 / total_supply (in basis points)
-    int ratio = total_collateral_usd * 10000 / total_supply;
-    
+;; Returns -1 (true) when ratio >= 120 %, 0 (false) otherwise.
+;; Bootstrap (zero supply) returns -1.
+int check_collateral_ratio(int total_collateral_usd, int total_supply) inline {
+    if (total_supply == 0) { return -1; }
+    int ratio = total_collateral_usd * basis_bp / total_supply;
     return ratio >= min_collateral_ratio;
 }
 
-;; ─── Mint Handler ────────────────────────────────────────────────────────────
+;; ─── Rates dict helpers (key: 8-bit currency, value: 128-bit rate) ──────────
 
-() handle_mint(int msg_value, cell in_msg_full, slice in_msg_body) impure {
-    ;; Parse incoming message
-    slice sender_address = parse_std_addr?(in_msg_full);
-    
-    int currency = in_msg_body~load_uint(8);       ;; currency code
-    int momo_amount = in_msg_body~load_uint(128);   ;; mobile money amount
-    slice momo_ref = in_msg_body~load_string();     ;; transaction reference
-    
-    ;; Load oracle rate for this currency
-    int rate = get_oracle_rate(currency);
-    throw_unless(1001, rate > 0);  ;; Rate not available
-    
-    ;; Calculate AFRI to mint
+int get_rate(cell rates, int currency) inline {
+    var (val, found?) = rates.udict_get?(8, currency);
+    if (found?) {
+        return val~load_uint(128);
+    }
+    return 0;
+}
+
+cell set_rate(cell rates, int currency, int rate) inline {
+    return rates.udict_set_builder(8, currency,
+        begin_cell().store_uint(rate, 128));
+}
+
+;; ─── Storage ────────────────────────────────────────────────────────────────
+
+(int, slice, cell, cell, slice, int, int, cell) load_data() inline {
+    slice ds = get_data().begin_parse();
+    int   total_supply       = ds~load_coins();
+    slice admin_address      = ds~load_msg_addr();
+    cell  content            = ds~load_ref();
+    cell  jetton_wallet_code = ds~load_ref();
+    cell  extra              = ds~load_ref();
+    slice es = extra.begin_parse();
+    slice oracle_address     = es~load_msg_addr();
+    int   total_collateral   = es~load_coins();
+    int   last_update        = es~load_uint(32);
+    cell  rates              = es~load_ref();
+    return (total_supply, admin_address, content, jetton_wallet_code,
+            oracle_address, total_collateral, last_update, rates);
+}
+
+() save_data(int total_supply, slice admin_address, cell content,
+             cell jetton_wallet_code, slice oracle_address,
+             int total_collateral, int last_update, cell rates)
+             impure inline {
+    cell extra = begin_cell()
+        .store_slice(oracle_address)
+        .store_coins(total_collateral)
+        .store_uint(last_update, 32)
+        .store_ref(rates)
+        .end_cell();
+    set_data(begin_cell()
+        .store_coins(total_supply)
+        .store_slice(admin_address)
+        .store_ref(content)
+        .store_ref(jetton_wallet_code)
+        .store_ref(extra)
+        .end_cell());
+}
+
+;; ─── Jetton wallet address calculation ──────────────────────────────────────
+
+cell pack_wallet_data(int balance, slice owner_address, slice jetton_master_address,
+                      cell jetton_wallet_code) inline {
+    return begin_cell()
+        .store_coins(balance)
+        .store_slice(owner_address)
+        .store_slice(jetton_master_address)
+        .store_ref(jetton_wallet_code)
+        .end_cell();
+}
+
+cell calculate_wallet_state_init(slice owner_address, slice jetton_master_address,
+                                  cell jetton_wallet_code) inline {
+    return begin_cell()
+        .store_uint(0, 2)
+        .store_dict(jetton_wallet_code)
+        .store_dict(pack_wallet_data(0, owner_address, jetton_master_address,
+                                     jetton_wallet_code))
+        .store_uint(0, 1)
+        .end_cell();
+}
+
+slice calculate_wallet_address(cell state_init) inline {
+    return begin_cell()
+        .store_uint(4, 3)
+        .store_int(0, 8)  ;; basechain (workchain 0)
+        .store_uint(cell_hash(state_init), 256)
+        .end_cell()
+        .begin_parse();
+}
+
+slice calculate_user_wallet_address(slice owner_address, slice jetton_master_address,
+                                     cell jetton_wallet_code) inline {
+    return calculate_wallet_address(
+        calculate_wallet_state_init(owner_address, jetton_master_address,
+                                    jetton_wallet_code));
+}
+
+;; ─── Mint dispatch (deploys wallet via state_init + internal_transfer) ──────
+
+() send_mint_message(slice to_address, int afri_amount, int forward_ton_amount,
+                     slice response_address, cell jetton_wallet_code) impure {
+    cell state_init = calculate_wallet_state_init(to_address, my_address(),
+                                                  jetton_wallet_code);
+    slice to_wallet = calculate_wallet_address(state_init);
+    cell master_msg = begin_cell()
+        .store_uint(op::internal_transfer, 32)
+        .store_uint(0, 64)             ;; query_id
+        .store_coins(afri_amount)
+        .store_slice(my_address())     ;; from = jetton master
+        .store_slice(response_address) ;; response (excesses)
+        .store_coins(forward_ton_amount)
+        .store_uint(0, 1)              ;; forward_payload: 0-bit = inline empty
+        .end_cell();
+    var msg = begin_cell()
+        .store_uint(0x18, 6)
+        .store_slice(to_wallet)
+        .store_coins(0)
+        .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
+        .store_ref(state_init)
+        .store_ref(master_msg);
+    send_raw_message(msg.end_cell(), send_mode::pay_fees_separately);
+}
+
+;; ─── Handlers ───────────────────────────────────────────────────────────────
+
+;; op::mint body: recipient:MsgAddress currency:uint8 momo_amount:uint128
+;;                forward_ton:Coins
+;; Caller must be admin (off-chain bridge that already verified mobile-money
+;; deposit via the oracle).
+() handle_mint(slice sender_address, slice in_msg_body) impure {
+    var (total_supply, admin_address, content, jetton_wallet_code,
+         oracle_address, total_collateral, last_update, rates) = load_data();
+
+    throw_unless(error::not_admin, equal_slices(sender_address, admin_address));
+
+    slice recipient   = in_msg_body~load_msg_addr();
+    int   currency    = in_msg_body~load_uint(8);
+    int   momo_amount = in_msg_body~load_uint(128);
+    int   forward_ton = in_msg_body~load_coins();
+
+    throw_unless(error::invalid_currency, currency <= MAX_CURRENCY);
+
+    int rate = get_rate(rates, currency);
+    throw_unless(error::no_rate, rate > 0);
+
     int afri_amount = calculate_mint_amount(momo_amount, rate);
-    throw_unless(1002, afri_amount > 0);  ;; Amount too small
-    
-    ;; Load current state
-    int total_supply = get_total_supply();
-    int total_collateral = get_total_collateral();
-    
-    ;; Add new collateral
-    int new_collateral = total_collateral + (momo_amount * scale / rate);
-    
-    ;; Check collateral ratio after mint
-    throw_unless(1003, check_collateral_ratio(new_collateral, total_supply + afri_amount));
-    
-    ;; Update storage
-    save_total_supply(total_supply + afri_amount);
-    save_total_collateral(new_collateral);
-    save_collateral_deposit(sender_address, currency, momo_amount);
-    
-    ;; Mint AFRI to user's jetton wallet
-    mint_jettons(sender_address, afri_amount);
-    
-    ;; Emit mint event
-    emit_mint_event(sender_address, currency, momo_amount, afri_amount, momo_ref);
+    throw_unless(error::amount_too_small, afri_amount > 0);
+
+    int momo_usd        = momo_amount * scale / rate;
+    int new_collateral  = total_collateral + momo_usd;
+    int new_supply      = total_supply + afri_amount;
+
+    throw_unless(error::collateral_breach,
+                 check_collateral_ratio(new_collateral, new_supply));
+
+    save_data(new_supply, admin_address, content, jetton_wallet_code,
+              oracle_address, new_collateral, last_update, rates);
+
+    send_mint_message(recipient, afri_amount, forward_ton,
+                      admin_address, jetton_wallet_code);
 }
 
-;; ─── Burn Handler ────────────────────────────────────────────────────────────
+;; op::burn_notification body (per TIP-74):
+;;   amount:Coins from_address:MsgAddress [response_destination:MsgAddress]
+;; Sender must be the AFRI wallet derived from from_address. Off-chain bridge
+;; subscribes to this event and triggers the mobile-money payout using the
+;; response_destination as the lookup key.
+() handle_burn_notification(slice sender_address, slice in_msg_body) impure {
+    int   amount       = in_msg_body~load_coins();
+    slice from_address = in_msg_body~load_msg_addr();
 
-() handle_burn(int msg_value, cell in_msg_full, slice in_msg_body) impure {
-    ;; Parse incoming message
-    slice sender_address = parse_std_addr?(in_msg_full);
-    
-    int afri_amount = in_msg_body~load_uint(128);   ;; AFRI tokens to burn
-    slice momo_number = in_msg_body~load_string();   ;; mobile money number for payout
-    
-    throw_unless(1004, afri_amount > 0);  ;; Amount too small
-    
-    ;; Load user's AFRI balance
-    int user_balance = get_jetton_balance(sender_address);
-    throw_unless(1005, user_balance >= afri_amount);  ;; Insufficient balance
-    
-    ;; Calculate payout
-    int currency = get_user_primary_currency(sender_address);
-    int rate = get_oracle_rate(currency);
-    throw_unless(1001, rate > 0);  ;; Rate not available
-    
-    int payout = calculate_burn_amount(afri_amount, rate);
-    throw_unless(1006, payout > 0);  ;; Payout too small
-    
-    ;; Update storage
-    int total_supply = get_total_supply();
-    int total_collateral = get_total_collateral();
-    int payout_usd = afri_amount * scale / scale;  ;; AFRI is USD-pegged
-    
-    ;; Remove collateral
-    int new_collateral = total_collateral - payout_usd;
-    throw_unless(1003, check_collateral_ratio(new_collateral, total_supply - afri_amount));
-    
-    save_total_supply(total_supply - afri_amount);
-    save_total_collateral(new_collateral);
-    
-    ;; Burn AFRI tokens
-    burn_jettons(sender_address, afri_amount);
-    
-    ;; Initiate mobile money payout (via bridge)
-    initiate_momo_payout(momo_number, currency, payout);
-    
-    ;; Emit burn event
-    emit_burn_event(sender_address, afri_amount, currency, payout, momo_number);
+    var (total_supply, admin_address, content, jetton_wallet_code,
+         oracle_address, total_collateral, last_update, rates) = load_data();
+
+    slice expected_wallet = calculate_user_wallet_address(
+        from_address, my_address(), jetton_wallet_code);
+    throw_unless(error::wallet_mismatch,
+                 equal_slices(sender_address, expected_wallet));
+
+    int new_supply     = total_supply - amount;
+    int new_collateral = total_collateral - amount;
+    if (new_collateral < 0) { new_collateral = 0; }
+
+    throw_unless(error::collateral_breach,
+                 check_collateral_ratio(new_collateral, new_supply));
+
+    save_data(new_supply, admin_address, content, jetton_wallet_code,
+              oracle_address, new_collateral, last_update, rates);
 }
 
-;; ─── Oracle Update Handler ───────────────────────────────────────────────────
+;; op::update_rates body: count:uint4 { currency:uint8 rate:uint128 }*count
+;; Caller must be the registered oracle.
+() handle_update_rates(slice sender_address, slice in_msg_body) impure {
+    var (total_supply, admin_address, content, jetton_wallet_code,
+         oracle_address, total_collateral, last_update, rates) = load_data();
 
-() handle_oracle_update(int msg_value, cell in_msg_full, slice in_msg_body) impure {
-    ;; Verify sender is authorized oracle
-    slice sender_address = parse_std_addr?(in_msg_full);
-    slice oracle = get_oracle_address();
-    throw_unless(1007, equal_slices(sender_address, oracle));
-    
-    ;; Parse rate updates
-    int count = in_msg_body~load_uint(4);  ;; Number of rate pairs (max 16)
-    
+    throw_unless(error::not_oracle,
+                 equal_slices(sender_address, oracle_address));
+
+    int count = in_msg_body~load_uint(4);
     while (count > 0) {
         int currency = in_msg_body~load_uint(8);
-        int rate = in_msg_body~load_uint(128);
-        throw_unless(1008, rate > 0);
-        
-        save_oracle_rate(currency, rate);
+        int rate     = in_msg_body~load_uint(128);
+        throw_unless(error::invalid_currency, currency <= MAX_CURRENCY);
+        throw_unless(error::no_rate, rate > 0);
+        rates = set_rate(rates, currency, rate);
         count -= 1;
     }
-    
-    ;; Update timestamp
-    save_last_update(now());
-    
-    ;; Emit oracle update event
-    emit_oracle_event();
+
+    save_data(total_supply, admin_address, content, jetton_wallet_code,
+              oracle_address, total_collateral, now(), rates);
 }
 
-;; ─── Get Methods ─────────────────────────────────────────────────────────────
+;; ─── recv_internal ──────────────────────────────────────────────────────────
 
-;; Get AFRI token info
-() get_jetton_data() returns (int total_supply, int mintable, slice admin_address) {
-    return (get_total_supply(), true, get_owner_address());
-}
+() recv_internal(int my_balance, int msg_value, cell in_msg_full,
+                 slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) { return (); }
 
-;; Get user's AFRI balance
-() get_wallet_data(slice owner) returns (int balance, int owner_id, slice owner_address) {
-    int balance = get_jetton_balance(owner);
-    return (balance, 0, owner);
-}
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { return (); }  ;; bounced — drop
 
-;; Get collateral ratio
-() get_collateral_ratio() returns (int ratio_bp) {
-    int total_supply = get_total_supply();
-    int total_collateral = get_total_collateral();
-    
-    if (total_supply == 0) {
-        return 0;  ;; No supply, no ratio
+    slice sender_address = cs~load_msg_addr();
+
+    int op       = in_msg_body~load_uint(32);
+    int query_id = in_msg_body~load_uint(64);
+
+    if (op == op::mint) {
+        handle_mint(sender_address, in_msg_body);
+        return ();
     }
-    
-    return total_collateral * 10000 / total_supply;
+
+    if (op == op::burn_notification) {
+        handle_burn_notification(sender_address, in_msg_body);
+        return ();
+    }
+
+    if (op == op::update_rates) {
+        handle_update_rates(sender_address, in_msg_body);
+        return ();
+    }
+
+    if (op == op::change_admin) {
+        var (total_supply, admin_address, content, jetton_wallet_code,
+             oracle_address, total_collateral, last_update, rates) = load_data();
+        throw_unless(error::not_admin,
+                     equal_slices(sender_address, admin_address));
+        slice new_admin = in_msg_body~load_msg_addr();
+        save_data(total_supply, new_admin, content, jetton_wallet_code,
+                  oracle_address, total_collateral, last_update, rates);
+        return ();
+    }
+
+    if (op == op::change_content) {
+        var (total_supply, admin_address, content, jetton_wallet_code,
+             oracle_address, total_collateral, last_update, rates) = load_data();
+        throw_unless(error::not_admin,
+                     equal_slices(sender_address, admin_address));
+        cell new_content = in_msg_body~load_ref();
+        save_data(total_supply, admin_address, new_content, jetton_wallet_code,
+                  oracle_address, total_collateral, last_update, rates);
+        return ();
+    }
+
+    if (op == op::update_oracle) {
+        var (total_supply, admin_address, content, jetton_wallet_code,
+             oracle_address, total_collateral, last_update, rates) = load_data();
+        throw_unless(error::not_admin,
+                     equal_slices(sender_address, admin_address));
+        slice new_oracle = in_msg_body~load_msg_addr();
+        save_data(total_supply, admin_address, content, jetton_wallet_code,
+                  new_oracle, total_collateral, last_update, rates);
+        return ();
+    }
+
+    throw(error::invalid_op);
 }
 
-;; Get oracle rate for currency
-() get_rate(int currency) returns (int rate) {
-    return get_oracle_rate(currency);
+;; ─── Get methods (TIP-74 standard + AFRI extensions) ────────────────────────
+
+(int, int, slice, cell, cell) get_jetton_data() method_id {
+    var (total_supply, admin_address, content, jetton_wallet_code,
+         _, _, _, _) = load_data();
+    return (total_supply, -1, admin_address, content, jetton_wallet_code);
 }
 
-;; Get system status
-() get_system_status() returns (int total_supply, int total_collateral, int ratio_bp, int last_update) {
-    int total_supply = get_total_supply();
-    int total_collateral = get_total_collateral();
+slice get_wallet_address(slice owner_address) method_id {
+    var (_, _, _, jetton_wallet_code, _, _, _, _) = load_data();
+    return calculate_user_wallet_address(owner_address, my_address(),
+                                         jetton_wallet_code);
+}
+
+int get_collateral_ratio() method_id {
+    var (total_supply, _, _, _, _, total_collateral, _, _) = load_data();
+    if (total_supply == 0) { return 0; }
+    return total_collateral * basis_bp / total_supply;
+}
+
+int get_currency_rate(int currency) method_id {
+    var (_, _, _, _, _, _, _, rates) = load_data();
+    return get_rate(rates, currency);
+}
+
+(int, int, int, int) get_system_status() method_id {
+    var (total_supply, _, _, _, _, total_collateral, last_update, _) = load_data();
     int ratio = 0;
-    
     if (total_supply > 0) {
-        ratio = total_collateral * 10000 / total_supply;
+        ratio = total_collateral * basis_bp / total_supply;
     }
-    
-    return (total_supply, total_collateral, ratio, get_last_update());
+    return (total_supply, total_collateral, ratio, last_update);
+}
+
+slice get_admin_address() method_id {
+    var (_, admin_address, _, _, _, _, _, _) = load_data();
+    return admin_address;
+}
+
+slice get_oracle_address() method_id {
+    var (_, _, _, _, oracle_address, _, _, _) = load_data();
+    return oracle_address;
 }

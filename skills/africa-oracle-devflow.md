@@ -4,11 +4,11 @@ description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads p
 metadata:
   type: skill
   parent: devflow@1.1
-  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0]
-  evolved_from: 2026-06-08 v0.3.1 consolidation pass
-  fitness: 0.90  # +0.02 vs v0.2.0 — public-facing docs now consistent with internal
+  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0, africa-oracle-devflow@0.3.0]
+  evolved_from: 2026-06-15 v0.3.2 FunC-rewrite session
+  fitness: 0.92  # +0.02 vs v0.3.0 — FunC compile gate added; Alternative pillar ⚠ → ✅
   niche: phase-0-stablecoin-oracle
-  version: 0.3.0
+  version: 0.3.1
   pillars:
     - resilient
     - sovereign
@@ -60,6 +60,18 @@ First-time: no remote configured. Suggest `gh repo create africa-oracle-agent --
 
 Never deploy without `py -3 -m pytest tests/ -v` green first.
 
+**FunC contract gate (v0.3.2+):** the AFRI Jetton (`afri-token.fc`) ships
+independently of the oracle. Its compile gate is **not** part of the Python CI
+because the FunC toolchain (`func`, `fift`) is heavy and the contract changes
+rarely. Run manually before any TON testnet/mainnet deploy:
+
+```sh
+FUNC_STDLIB=/path/to/stdlib.fc bash tests/run_func_tests.sh
+# then:
+bash afri-deploy.sh           # testnet (compile + print deploy instructions)
+bash afri-deploy.sh --verify  # print verification commands for lite-client
+```
+
 ### CI — Continuous Improve
 Run `I → Im → C → Bl` sequence. **Skip P + D in CI** unless explicitly requested — quality cycle does not auto-ship for a financial-rails project.
 
@@ -91,10 +103,17 @@ Every change passes the union of R²S² *and* the 5 pillars. **R²S²:**
 
 ## Scoped out (do not implement without explicit request)
 
-- **FunC contract rewrite** — `afri-token.fc` is scaffold-quality, has TIP-74 stdlib mismatches (`parse_std_addr?` is wrong idiom; function declarations use non-FunC syntax). Tracked in `EVAL_REPORT.md` P1-5/6/7. Has been flagged in v0.2.0, v0.3.0, v0.3.1; needs its own dedicated session.
 - **Real provider API integration** — gated on M-Pesa Daraja / Airtel Money / Orange Money / MTN MoMo API access + KYC. Don't fake it.
 - **Outlier detection (Tukey fence)** — roadmap.
 - **African-mirror image registry** — replace GHCR as primary distribution. Roadmap Phase 1 sovereignty work.
+- **TON testnet deploy** — requires a funded testnet wallet + lite-client. Contract is compile-clean (v0.3.2) but landing on chain is a separate session with credential handling.
+
+## Resolved scope-outs (history)
+
+- **FunC contract rewrite** — *resolved in v0.3.2 (2026-06-15)*. `afri-token.fc`
+  rewritten against current TIP-74 stdlib; compiles to BoC via
+  `tests/run_func_tests.sh`. P1-5/6/7 all discharged. Unit tests in
+  `tests/test_afri_token_funcs.fc` (7 methods, ids 100-106).
 
 ## Polyglot drift policy
 
@@ -166,7 +185,9 @@ devflow@1.1
   └── kafca (terse overlay)
        └── evo-metaclaw (distillation)
             └── africa-oracle-devflow@0.1.0    (initial distillation)
-                 └── africa-oracle-devflow@0.2.0  ← this file (5-pillar fine-tune mutation)
+                 └── africa-oracle-devflow@0.2.0  (5-pillar fine-tune mutation)
+                      └── africa-oracle-devflow@0.3.0  (consolidation + README rule)
+                           └── africa-oracle-devflow@0.3.1  ← this file (FunC compile gate)
 ```
 
 Bump version when: new deploy target added, provider list changes, R²S² gate criteria added, test recipe changes, OR pillar definition changes.
@@ -177,7 +198,8 @@ Bump version when: new deploy target added, provider list changes, R²S² gate c
 |---|---|---|---|
 | 0.1.0 | 2026-06-08 | Initial distillation from B+P+D+Bl+E+CI session — pre-loaded providers, ARM64 paths, R²S² | pending |
 | 0.2.0 | 2026-06-08 | 5-pillar overlay added to R²S² gate; test baseline 14 → 20; API surface extended with `/feeds/quorum` + `/feeds/stream` + `/metrics`; `SOVEREIGNTY.md` referenced | 0.88 (5-pillar avg) |
-| **0.3.0** | **2026-06-08** | **Bl rule extended to enforce README.md consistency with Blueprint + SOVEREIGNTY + DEPLOY (README was stale through v0.2.0/v0.3.0 ships); polyglot-drift policy formalized (quorum is Python-only by design); FunC scope-out hardened (third repeated flag → dedicated session)** | **0.90 (public-facing docs now consistent)** |
+| 0.3.0 | 2026-06-08 | Bl rule extended to enforce README.md consistency with Blueprint + SOVEREIGNTY + DEPLOY (README was stale through v0.2.0/v0.3.0 ships); polyglot-drift policy formalized (quorum is Python-only by design); FunC scope-out hardened (third repeated flag → dedicated session) | 0.90 (public-facing docs now consistent) |
+| **0.3.1** | **2026-06-15** | **FunC contract scope-out resolved: `afri-token.fc` rewritten against TIP-74 stdlib (P1-5/6/7 discharged); compile gate added to D path; `tests/test_afri_token_funcs.fc` + `tests/run_func_tests.sh` added; collateral-ratio unit bug (12 % vs 120 %) corrected; Solid R²S² gate ⚠ → ✅** | **0.92 (Alternative pillar now ⚠ → ✅; FunC compiles to BoC)** |
 
 ---
-*Evolved 2026-06-08 from a Bl+E+CI+evolve consolidation pass. Source genome: `africa-oracle-devflow@0.2.0`. Fitness: 0.90.*
+*Evolved 2026-06-15 from a B+Ci+E+P+D+Bl FunC-rewrite session. Source genome: `africa-oracle-devflow@0.3.0`. Fitness: 0.92.*
