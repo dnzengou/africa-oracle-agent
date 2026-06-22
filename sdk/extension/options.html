@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AFRI Oracle — options</title>
+<style>
+  body { font: 13px system-ui, sans-serif; padding: 16px; max-width: 420px; }
+  label { display: block; margin: 8px 0 4px; }
+  input { width: 100%; padding: 6px; box-sizing: border-box; }
+  button { margin-top: 12px; padding: 6px 12px; }
+  .saved { color: #0a7; margin-left: 8px; }
+</style>
+</head>
+<body>
+  <h2>AFRI Oracle settings</h2>
+  <label>API base URL</label>
+  <input id="baseUrl" type="url" placeholder="https://africa-oracle.fly.dev">
+  <label>Quorum threshold (1–4)</label>
+  <input id="minProviders" type="number" min="1" max="4" value="2">
+  <button id="save">Save</button>
+  <span id="msg" class="saved" hidden>Saved.</span>
+  <script src="options.js" type="module"></script>
+</body>
+</html>

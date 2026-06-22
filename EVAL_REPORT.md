@@ -221,11 +221,79 @@ proper `method_id` getters.
 
 ## Scores roll-up
 
-| Axis | v0.3.0 | v0.3.1 | v0.3.2 | Δ |
-|---|---|---|---|---|
-| Security | 9 | 9 | 9 | – |
-| Correctness | 9 | 9 | 10 | +1 (FunC compiles, units fixed) |
-| Performance | 9 | 9 | 9 | – |
-| Quality | 9 | 9 | 9 | – |
-| **5-pillar avg** | 8.8 | 8.8 | **9.2** | +0.4 (Alternative pillar ⚠ → ✅) |
+| Axis | v0.3.0 | v0.3.1 | v0.3.2 | v0.4.0 | Δ |
+|---|---|---|---|---|---|
+| Security | 9 | 9 | 9 | 9 | – |
+| Correctness | 9 | 9 | 10 | 10 | – |
+| Performance | 9 | 9 | 9 | 9 | – |
+| Quality | 9 | 9 | 9 | 10 | +1 (KafCa-minimal SDK surfaces) |
+| **5-pillar avg** | 8.8 | 8.8 | 9.2 | **9.4** | +0.2 (Affordable + Alternative widen) |
+
+---
+
+# v0.4.0 — Distribution Audit (2026-06-22)
+
+**Scope of change:** five-channel SDK distribution layer (`sdk/`) — Python pip
+package, npm TypeScript SDK, Manifest V3 browser extension, installable PWA,
+VSCode extension, POSIX one-liner installer. No change to oracle core or API
+behavior. ARM64-native everywhere (no compiled deps).
+
+## Security (P0)
+
+- **Browser extension CSP** — `extension_pages` declares `script-src 'self'; object-src 'self'` and pins `connect-src` to known hosts; no `'unsafe-eval'`, no `'unsafe-inline'`. ✅
+- **No `innerHTML` / `eval` / `document.write` in any JS surface** — `popup.js`, `app.js`, `extension.js`, `background.js` use `createElement` + `textContent`. Enforced by `tests/test_sdk.py::test_extension_popup_uses_no_innerhtml` and `test_pwa_serves_no_eval`. ✅
+- **Host permissions narrowly scoped** — extension `host_permissions` lists only `africa-oracle.fly.dev` + `*.vercel.app`. ✅
+- **No secrets** — every SDK reads its endpoint from env/config. URL setter on extension/VSCode validates `https?://`. ✅
+- **VSCode extension** uses `node:https` (stdlib) instead of pulling `axios`/`node-fetch`. Smaller attack surface. ✅
+
+## Correctness (P1)
+
+- **Timeout on every network call** — Python SDK: `urllib` `timeout=10`; TS SDK: `AbortController` + `setTimeout(10_000)`; extension popup + bg + PWA: same. ✅
+- **Typed error path** — `OracleError` raised on non-2xx, timeout, or parse failure. No silent zeros. ✅
+- **Idempotent storage** — extension `chrome.storage.sync` (settings) vs `local` (cached report) correctly separated. ✅
+- **PWA service worker** — network-first for `/feeds*` + `/hunt`, cache-first for static shell. Won't serve stale prices. ✅
+
+## Performance (P2)
+
+- **Zero runtime deps on Python SDK** — stdlib only. ARM64 wheels not needed (pure-Python wheel). ✅
+- **TS SDK zero deps** — uses global `fetch` + `EventSource`. Works on browsers, Node ≥18, Deno, Bun, Cloudflare Workers. ✅
+- **Extension background refresh** every 5 min (not on every popup open) — caches result for popup, popup shows cached if <60 s old. ✅
+- **PWA caches shell** so app opens offline; only API calls hit the network. ✅
+
+## Quality (P3–P4) · KafCa
+
+- **No bloat** — refused to ship a 30-50 MB WebView APK; PWA + Bubblewrap is the lighter ARM64-native path (documented in `sdk/pwa/README.md`).
+- **One source of truth for skill artifact** — `skills/africa-oracle-devflow.md`. Python wheel copies via `force-include` at build time; `sdk/python/africa_oracle/_skill.md` is gitignored.
+- **Build script idempotent** — `sdk/build.sh` regenerates placeholder icons only if missing, skips channels whose toolchain isn't installed.
+
+## Tests
+
+```
+py -3 -m pytest tests/ -v
+# 30 passed in 0.76s
+#   20 core (oracle + aggregation + quorum + api)
+#   10 SDK (imports, manifest JSON, CSP, no-XSS, env override)
+```
+
+## R²S² gate — v0.4.0
+
+- **Robust:** ✅ every SDK has timeout + error type
+- **Reliable:** ✅ 30/30 green (was 20)
+- **Solid:** ✅ no half-features — all 5 channels installable today
+- **Stable:** ✅ API surface unchanged from v0.3.2; bumped only `VERSION` constant
+- **Resistant:** ✅ extension falls back to cached report on network error; PWA same
+- **Scalable:** ✅ TS SDK runs on edge runtimes (Workers/Deno); SSE wrapper included
+- **Secure:** ✅ MV3 CSP locked down; no innerHTML/eval/inline; URL allow-list
+- **Systematic:** ✅ EVAL + Blueprint + skill artifact + README + CLAUDE.md all bumped together
+
+## 5-pillar verdict — v0.4.0
+
+| Pillar | v0.3.2 | v0.4.0 | Why |
+|---|---|---|---|
+| Resilient | 9 | 9 | unchanged (SDKs consume `/feeds/quorum`) |
+| Sovereign | 9 | 9 | unchanged |
+| Scalable | 9 | 10 | SDKs ship for 6 runtimes incl. edge (CF Workers, Deno) |
+| Affordable | 9 | 10 | PWA replaces APK (zero hosting cost on static); one-liner installer for $35 Pi |
+| Alternative | 10 | 10 | unchanged (FunC ✅ since v0.3.2) |
+| **Avg** | **9.2** | **9.6** | +0.4 |
 

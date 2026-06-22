@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b8a5a">
+<title>AFRI Africa Oracle</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  :root { color-scheme: dark; --bg:#0b0f14; --fg:#e8eef5; --muted:#7a8896; --ok:#0b8a5a; --err:#d33;
+          --row:#11171f; --row2:#0d1218; }
+  *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,system-ui,sans-serif; min-height:100dvh}
+  header{padding:env(safe-area-inset-top,12px) 16px 8px; display:flex; justify-content:space-between; align-items:baseline}
+  h1{font-size:18px; margin:0; letter-spacing:.5px}
+  .status{font-size:11px; color:var(--muted)}
+  .ok{color:var(--ok)} .err{color:var(--err)}
+  main{padding:0 8px 80px}
+  table{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums}
+  th,td{padding:8px 6px; text-align:right; font-size:13px}
+  th:first-child,td:first-child{text-align:left; padding-left:10px}
+  th{color:var(--muted); font-weight:500; border-bottom:1px solid #1c2530; font-size:11px; text-transform:uppercase}
+  tbody tr:nth-child(odd){background:var(--row)} tbody tr:nth-child(even){background:var(--row2)}
+  td:first-child{font-weight:600}
+  footer{position:fixed; bottom:0; left:0; right:0; background:var(--bg);
+    padding:10px 16px env(safe-area-inset-bottom,12px); border-top:1px solid #1c2530;
+    display:flex; justify-content:space-between; align-items:center}
+  button{font:inherit; padding:8px 16px; background:var(--ok); color:white; border:0; border-radius:6px}
+  button:disabled{opacity:.5}
+  .ts{font-size:11px; color:var(--muted)}
+  .empty{padding:40px 20px; text-align:center; color:var(--muted)}
+  #install{padding:6px 10px; background:transparent; color:var(--ok); border:1px solid var(--ok)}
+</style>
+</head>
+<body>
+  <header>
+    <h1>AFRI Oracle</h1>
+    <span id="status" class="status">…</span>
+  </header>
+  <main>
+    <div id="content" class="empty">Loading…</div>
+  </main>
+  <footer>
+    <span id="ts" class="ts"></span>
+    <span>
+      <button id="install" hidden>Install</button>
+      <button id="refresh">Refresh</button>
+    </span>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

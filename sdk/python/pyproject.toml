@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "africa-oracle"
+version = "0.4.0"
+description = "Python SDK for the AFRI Africa Oracle (mobile-money price feeds, TON stablecoin)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "AFRI" }]
+keywords = ["africa", "stablecoin", "oracle", "ton", "mobile-money", "afri"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Financial and Insurance Industry",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business :: Financial",
+]
+dependencies = []  # stdlib only — ARM64-native, no compiled wheels
+
+[project.urls]
+Homepage = "https://github.com/nzengou/africa-oracle-agent"
+Issues = "https://github.com/nzengou/africa-oracle-agent/issues"
+
+[project.scripts]
+afri-oracle = "africa_oracle.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["africa_oracle"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../skills/africa-oracle-devflow.md" = "africa_oracle/_skill.md"

@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "AFRI Africa Oracle",
+  "short_name": "AFRI",
+  "version": "0.4.0",
+  "description": "Live mobile-money price feeds from M-Pesa, Airtel, Orange, MTN — across 30+ African countries.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AFRI Africa Oracle",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://africa-oracle.fly.dev/*",
+    "https://*.vercel.app/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://africa-oracle.fly.dev https://*.vercel.app"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}

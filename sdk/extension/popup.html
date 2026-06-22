@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AFRI Oracle</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; padding: 12px; width: 320px; }
+  h1 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; }
+  .status { font-size: 11px; color: #888; }
+  .ok { color: #0a7; } .err { color: #d33; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { text-align: right; padding: 3px 4px; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  tr:nth-child(even) td { background: rgba(0,0,0,0.04); }
+  @media (prefers-color-scheme: dark) {
+    tr:nth-child(even) td { background: rgba(255,255,255,0.06); }
+  }
+  .empty { padding: 20px; text-align: center; color: #888; }
+  button { font: inherit; padding: 4px 10px; border: 1px solid #888; background: transparent;
+           color: inherit; border-radius: 4px; cursor: pointer; }
+  footer { margin-top: 8px; font-size: 10px; color: #888; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <h1>AFRI Oracle <span id="status" class="status">…</span></h1>
+  <div id="content" class="empty">Loading…</div>
+  <footer>
+    <span id="ts"></span>
+    <a href="#" id="refresh">refresh</a>
+  </footer>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 > **A resilient, sovereign, scalable, affordable alternative to foreign fiat-backed stablecoins.**
 > Phase 0 of the AFRI Jetton (TIP-74 on TON) — mobile-money-native price oracle for ~30 African countries.
 
-[![tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]()
+[![tests](https://img.shields.io/badge/tests-30%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]()
 
 ## What it does
 
@@ -63,7 +63,28 @@ py -3 -m pytest tests/ -v   # 20 passing
 docker compose up -d
 ```
 
-## API endpoints (v0.3.0)
+## SDKs & distribution (v0.4.0)
+
+Consume the oracle from anywhere — server, browser, phone, edge.
+
+```sh
+pip install africa-oracle              # Python
+npm  i   @afri/oracle                  # TypeScript / JavaScript
+curl -fsSL https://raw.githubusercontent.com/nzengou/africa-oracle-agent/main/sdk/installer/install.sh | sh
+```
+
+| Channel | Path | Audience |
+|---|---|---|
+| Python SDK | [`sdk/python/`](sdk/python/) | data scientists, backends |
+| TS/JS SDK | [`sdk/typescript/`](sdk/typescript/) | web, Node, Deno, Bun, CF Workers |
+| Browser extension (MV3) | [`sdk/extension/`](sdk/extension/) | end users — Chromium + Firefox |
+| PWA installable | [`sdk/pwa/`](sdk/pwa/) | mobile (APK-alternative) |
+| VSCode plugin | [`sdk/vscode/`](sdk/vscode/) | developers |
+| POSIX one-liner | [`sdk/installer/`](sdk/installer/) | Raspberry Pi / Termux / edge |
+
+Build all artifacts at once: `bash sdk/build.sh` → `dist/`.
+
+## API endpoints (v0.4.0)
 
 | Method | Path | Pillar |
 |---|---|---|
@@ -98,7 +119,7 @@ Detailed instructions: [`DEPLOY.md`](DEPLOY.md).
 
 ## Roadmap
 
-- [x] **Phase 0** — Oracle Bootstrapping (v0.3.0): provider mapping · simulated feed · quorum aggregation · async API · SSE streaming · multi-arch image · self-host path
+- [x] **Phase 0** — Oracle Bootstrapping (v0.4.0): provider mapping · simulated feed · quorum aggregation · async API · SSE streaming · multi-arch image · self-host path · 5-channel SDK distribution
 - [ ] **Phase 1** — AFRI Jetton on TON testnet: FunC contract rewrite against TIP-74 stdlib · oracle-signed price feeds · bridge handshake
 - [ ] **Phase 2** — Production rollout: provider API keys + KYC at provider boundary · liquidity onboarding (STON.fi LP) · reserve audit publication · mainnet deploy
 

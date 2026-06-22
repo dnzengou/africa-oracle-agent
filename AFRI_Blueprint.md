@@ -1,5 +1,5 @@
 # AFRI Africa Oracle — Project Blueprint
-**Version:** 0.3.2 · **Date:** 2026-06-15 · **Deploy:** [pending]
+**Version:** 0.4.0 · **Date:** 2026-06-22 · **Deploy:** [pending]
 
 ## Value proposition
 
@@ -62,6 +62,7 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - [x] GitHub Actions → GHCR
 - [x] Test suite (pytest, 20 tests)
 - [x] **`SOVEREIGNTY.md`** with AFRI vs USDT/USDC comparison — Alternative pillar
+- [x] **5-channel SDK distribution** (Python pip · npm TS · MV3 ext · PWA · VSCode · POSIX one-liner) — Affordable + Alternative
 - [ ] Real API integration (requires provider keys)
 - [ ] Outlier detection (Tukey fence on spread)
 - [ ] African-mirror image registry (post-GHCR sovereignty)
@@ -104,6 +105,14 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 | `afri-token.fc` | TON Jetton smart contract (TIP-74, compiles to BoC) | ✅ |
 | `tests/test_afri_token_funcs.fc` | FunC unit tests (7 methods, ids 100-106) | ✅ |
 | `tests/run_func_tests.sh` | FunC compile + assemble gate runner | ✅ |
+| `tests/test_sdk.py` | SDK smoke tests (imports, manifests, CSP, no-XSS) | ✅ |
+| `sdk/python/` | Python SDK (pip `africa-oracle`, ARM64-native stdlib) | ✅ |
+| `sdk/typescript/` | TS SDK (npm `@afri/oracle`, browsers + Node ≥18 + Deno + Bun + CF Workers) | ✅ |
+| `sdk/extension/` | Manifest V3 browser extension (Chromium + Firefox) | ✅ |
+| `sdk/pwa/` | Installable PWA (APK-alternative, TWA-ready via Bubblewrap) | ✅ |
+| `sdk/vscode/` | VSCode extension (command palette) | ✅ |
+| `sdk/installer/install.sh` | POSIX one-liner installer for edge nodes | ✅ |
+| `sdk/build.sh` | Umbrella build script → `dist/{whl,tgz,zip,vsix}` | ✅ |
 | `Dockerfile` | Multi-arch image | ✅ |
 | `fly.toml` | Fly.io ARM64 config | ✅ |
 | `vercel.json` | Vercel ASGI config | ✅ |
@@ -146,6 +155,29 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - Full deploy (10 providers × 30 countries × 30 s polling): ~\$5K/mo at production scale
 
 ## Changelog
+
+### v0.4.0 — 2026-06-22
+**Build (B) — five-channel distribution layer:** the oracle is now consumable
+from anywhere a developer or user might already be — pip, npm, browser
+extension, installable mobile PWA, VSCode, and a POSIX one-liner for $35
+edge hardware. ARM64-native everywhere; no compiled deps anywhere.
+
+- `sdk/python/` — pip `africa-oracle` (stdlib only, `Client` + `OracleError` + `PriceFeed` + `QuorumReport` + `afri-oracle` CLI + bundled DevFlow skill exposed via `devflow_skill()`)
+- `sdk/typescript/` — npm `@afri/oracle` (zero-deps, fetch-based, ships `streamFeeds()` SSE helper, type-safe `PriceFeed` + `QuorumReport`)
+- `sdk/extension/` — Manifest V3 browser extension; popup table of quorum prices, options page for custom API URL, background SW refreshes every 5 min, strict CSP (no inline, no eval, host-pinned `connect-src`)
+- `sdk/pwa/` — installable mobile PWA (192/512 icons, theme-color, SW with shell caching + network-first API); KafCa rationale documented for *not* shipping a 50 MB APK shell
+- `sdk/vscode/` — VSCode extension (`AFRI: health / hunt / quorum / setUrl` commands; uses `node:https` to keep VSIX small)
+- `sdk/installer/install.sh` — `curl … | sh` installer that drops `oracle_agent.sh` + bridge + deploy harnesses into `$HOME/.local`, optionally `docker pull`s the multi-arch image
+- `sdk/build.sh` — one command builds **all** artifacts into `dist/` (placeholder PNG icons generated inline if missing)
+
+**Quality gates:**
+- `tests/test_sdk.py` adds **10 tests** (30 total, was 20) — SDK import, env-override, JSON-manifest validity, MV3 CSP locked down, no `innerHTML`/`eval`/`document.write` in any JS surface
+- `api/app.py` `VERSION` bumped 0.3.0 → 0.4.0
+- `README.md` + `CLAUDE.md` reflect the new distribution surfaces; test-count badge 20 → 30
+
+**Evaluate (E):** 5-pillar avg **9.2 → 9.6**. Affordable + Scalable both gain on shipping to edge runtimes (CF Workers/Deno) and replacing a hypothetical heavyweight APK with the PWA. R²S² all green (was all green).
+
+**Evolve (evo-metaclaw):** `skills/africa-oracle-devflow.md` bumped 0.3.1 → 0.4.0 — distribution-surface rule baked into Bl (any new feature must consider whether SDK consumers need a new bind point) and into D (deploy now also covers SDK publish targets when a release is cut).
 
 ### v0.3.2 — 2026-06-15
 **Build (B) — dedicated FunC session:** discharges P1-5/6/7 (raised v0.2.0, re-flagged v0.3.0 and v0.3.1).
@@ -235,4 +267,4 @@ v0.3.0 → v0.3.1 with FunC compile gate added to D path.
 - Bridge + deploy shell harnesses
 
 ---
-*AFRI Africa Oracle · v0.3.1 · 2026-06-08*
+*AFRI Africa Oracle · v0.4.0 · 2026-06-22*

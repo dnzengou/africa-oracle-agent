@@ -20,6 +20,15 @@ dist/
 *.boc
 *.fift
 
+# SDK build artifacts (skill is copied in from skills/ at build time)
+sdk/python/africa_oracle/_skill.md
+sdk/python/build/
+sdk/typescript/node_modules/
+sdk/typescript/dist/
+sdk/vscode/node_modules/
+sdk/extension/icons/icon-*.png
+sdk/pwa/icons/icon-*.png
+
 # Logs / data
 *.log
 *.jsonl

@@ -1,0 +1,36 @@
+{
+  "name": "afri-oracle",
+  "displayName": "AFRI Africa Oracle",
+  "description": "Query mobile-money price feeds (M-Pesa, Airtel, Orange, MTN) from the VS Code command palette.",
+  "version": "0.4.0",
+  "publisher": "afri",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "afri.health",   "title": "AFRI: Oracle health" },
+      { "command": "afri.hunt",     "title": "AFRI: Hunt single feed" },
+      { "command": "afri.quorum",   "title": "AFRI: Quorum report" },
+      { "command": "afri.setUrl",   "title": "AFRI: Set API URL" }
+    ],
+    "configuration": {
+      "title": "AFRI Africa Oracle",
+      "properties": {
+        "afri.baseUrl": {
+          "type": "string",
+          "default": "https://africa-oracle.fly.dev",
+          "description": "Base URL of the oracle API."
+        },
+        "afri.minProviders": {
+          "type": "number",
+          "default": 2, "minimum": 1, "maximum": 4,
+          "description": "Quorum threshold for /feeds/quorum."
+        }
+      }
+    }
+  },
+  "repository": "github:nzengou/africa-oracle-agent",
+  "license": "MIT"
+}

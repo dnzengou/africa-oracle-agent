@@ -13,6 +13,15 @@ Plus bridge layer:
 - `afri-token.fc` — TON Jetton (TIP-74) smart contract
 - `afri-deploy.sh` — TON testnet/mainnet deploy harness
 
+Plus distribution layer (v0.4.0):
+- `sdk/python/` — pip-installable Python SDK (stdlib only, ARM64-native)
+- `sdk/typescript/` — npm `@afri/oracle` for browser/Node/Deno/Bun/CF Workers
+- `sdk/extension/` — Manifest V3 browser extension (Chromium + Firefox)
+- `sdk/pwa/` — installable mobile PWA (TWA-ready, APK-alternative)
+- `sdk/vscode/` — VSCode extension (command palette)
+- `sdk/installer/install.sh` — one-liner POSIX installer for edge nodes
+- `sdk/build.sh` — builds all artifacts into `dist/`
+
 ## How to run
 
 ```sh
@@ -30,7 +39,10 @@ docker buildx build --platform linux/amd64,linux/arm64 -t africa-oracle:latest .
 docker run --rm africa-oracle:latest --provider mtn --country GH --pretty
 
 # Tests
-pytest tests/ -v
+pytest tests/ -v       # 30 passing (20 core + 10 SDK)
+
+# Build all distribution artifacts
+bash sdk/build.sh      # → dist/{whl,tgz,zip,vsix}
 ```
 
 ## Conventions

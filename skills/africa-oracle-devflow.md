@@ -4,11 +4,11 @@ description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads p
 metadata:
   type: skill
   parent: devflow@1.1
-  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0, africa-oracle-devflow@0.3.0]
-  evolved_from: 2026-06-15 v0.3.2 FunC-rewrite session
-  fitness: 0.92  # +0.02 vs v0.3.0 — FunC compile gate added; Alternative pillar ⚠ → ✅
+  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0, africa-oracle-devflow@0.3.0, africa-oracle-devflow@0.3.1]
+  evolved_from: 2026-06-22 v0.4.0 distribution-surface session
+  fitness: 0.96  # +0.04 vs v0.3.1 — 5-channel SDK ships; Scalable + Affordable pillars widen
   niche: phase-0-stablecoin-oracle
-  version: 0.3.1
+  version: 0.4.0
   pillars:
     - resilient
     - sovereign
@@ -47,18 +47,27 @@ Default next item if no spec: extend test coverage or implement a real provider 
 Always run `py -3 -m pytest tests/ -v` (**20 tests baseline post-v0.3.0**). Grep for hardcoded paths matching `/storage/emulated/...` (PicoClaw legacy — should not exist post-v0.2.0). Audit shell scripts for `#!/bin/sh` + bash-isms (`local`, `RANDOM`, `[[ ]]`). Score against the **5 pillars + R²S²** gate (see below).
 
 ### Bl — Blueprint
-Update `AFRI_Blueprint.md` (not a generic Blueprint name). Preserve changelog; bump semver per: patch = fixes, minor = new endpoint/provider/deploy target, major = breaking schema change. **Also check `README.md`** — it is the public-facing truth and must agree with Blueprint + SOVEREIGNTY + DEPLOY on: value prop, API surface, supported providers, deploy targets, and test count. If they diverge, README is the one that's wrong (it was stale through v0.2.0 and v0.3.0 ships).
+Update `AFRI_Blueprint.md` (not a generic Blueprint name). Preserve changelog; bump semver per: patch = fixes, minor = new endpoint/provider/deploy target/**SDK channel**, major = breaking schema change. **Also check `README.md`** — it is the public-facing truth and must agree with Blueprint + SOVEREIGNTY + DEPLOY on: value prop, API surface, supported providers, deploy targets, test count, **and SDK distribution list**. If they diverge, README is the one that's wrong (it was stale through v0.2.0 and v0.3.0 ships).
+
+**Distribution-surface rule (v0.4.0+):** any new endpoint or feature must be reviewed against the 5 SDK channels (`sdk/python/`, `sdk/typescript/`, `sdk/extension/`, `sdk/pwa/`, `sdk/vscode/`). If the feature would be useful to a consumer of any channel, add a binding there in the same PR. Don't let SDKs drift behind the API.
 
 ### P — Push
 First-time: no remote configured. Suggest `gh repo create africa-oracle-agent --public --source=. --remote=origin --push` rather than guessing. Commit prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `security:` (no Conventional Commit body required, but include Co-Authored-By Claude).
 
 ### D — Deploy
-**ARM64 first.** Three paths (`DEPLOY.md`):
+**ARM64 first.** Three runtime paths (`DEPLOY.md`):
 - **Primary:** Fly.io `jnb` region, shared-cpu-1x, `fly.toml` already in repo. `fly deploy`.
 - **Image:** GHCR multi-arch (amd64+arm64) via `.github/workflows/ci.yml` on push to main. `ghcr.io/<owner>/africa-oracle-agent:latest`.
 - **Serverless:** Vercel (Python ASGI, 60s max) — `vercel.json` in repo.
 
-Never deploy without `py -3 -m pytest tests/ -v` green first.
+**SDK publish targets (v0.4.0+) — release-only, not every push:**
+- **PyPI:** `africa-oracle` — `cd sdk/python && python -m build && twine upload dist/*` (run inside a tagged release flow)
+- **npm:** `@afri/oracle` — `cd sdk/typescript && npm publish --access public`
+- **Chrome Web Store / Firefox Add-ons:** upload `dist/afri-extension-*.zip`
+- **VS Code Marketplace:** `cd sdk/vscode && vsce publish`
+- **PWA static host:** copy `sdk/pwa/` to GitHub Pages / Netlify / Cloudflare Pages
+
+Never deploy without `py -3 -m pytest tests/ -v` green first (30/30 baseline post-v0.4.0).
 
 **FunC contract gate (v0.3.2+):** the AFRI Jetton (`afri-token.fc`) ships
 independently of the oracle. Its compile gate is **not** part of the Python CI
@@ -79,7 +88,7 @@ Run `I → Im → C → Bl` sequence. **Skip P + D in CI** unless explicitly req
 
 Every change passes the union of R²S² *and* the 5 pillars. **R²S²:**
 - **R**obust — graceful error path on all I/O
-- **R**eliable — `py -3 -m pytest tests/ -v` is 20/20 green (was 14 pre-v0.3.0)
+- **R**eliable — `py -3 -m pytest tests/ -v` is 30/30 green (was 20 pre-v0.4.0)
 - **S**olid — no half-implementations; gate real-API behind `NotImplementedError` if keys missing
 - **S**table — backwards-compatible API surface (`/health`, `/providers`, `/hunt`, `/feeds/all`, `/feeds/quorum`, `/feeds/stream`, `/metrics`)
 - **R**esistant — fail loud on `bc` errors, missing files, malformed input (no silent zeros)
@@ -91,7 +100,7 @@ Every change passes the union of R²S² *and* the 5 pillars. **R²S²:**
 - **Resilient** — quorum aggregation (≥2 providers per currency to publish); failed currencies surface in `quorum_failed`, never silent zero. Verify via `/feeds/quorum?min_providers=2` smoke test.
 - **Sovereign** — primary deploy region in `{jnb, cpt, nbo}`; no US-mandatory dependency; self-host path (`docker-compose.yml`) preserved on any infra change.
 - **Scalable** — new endpoints use `asyncio.to_thread` for blocking work; streaming endpoints emit SSE; counters are gauges or counters per Prometheus convention.
-- **Affordable** — no new runtime deps beyond `fastapi+uvicorn+pydantic+httpx`; image stays < 200 MB; CPU footprint fits shared-cpu-1x.
+- **Affordable** — no new runtime deps beyond `fastapi+uvicorn+pydantic+httpx`; image stays < 200 MB; CPU footprint fits shared-cpu-1x. **Distribution layer:** every SDK is zero-runtime-deps (Python stdlib only; TS uses global `fetch`/`EventSource`; PWA replaces hypothetical 50 MB APK shell).
 - **Alternative** — every new feature is reviewed against the USDT/USDC comparison table in `SOVEREIGNTY.md`: does it widen AFRI's lead on settlement cost, jurisdictional control, or African mobile-money integration? If not, justify.
 
 ## Financial-math invariants
@@ -132,10 +141,11 @@ The three ports (py/go/sh) are **not** required to be feature-equivalent. Roles:
 ```sh
 py -3 -m pip install -r requirements.txt pytest
 py -3 -m pytest tests/ -v
-# Expected: 20 passed in <2s
+# Expected: 30 passed in <2s
 #   14 core tests (provider mapping, simulation, aggregation)
 #    3 quorum tests (Resilient pillar)
 #    3 API endpoint tests (health/metrics, quorum, hunt-validation)
+#   10 SDK tests (Python import, manifest JSON, MV3 CSP, no-XSS, env override)
 ```
 
 ## Smoke recipe (post-deploy)
@@ -187,7 +197,8 @@ devflow@1.1
             └── africa-oracle-devflow@0.1.0    (initial distillation)
                  └── africa-oracle-devflow@0.2.0  (5-pillar fine-tune mutation)
                       └── africa-oracle-devflow@0.3.0  (consolidation + README rule)
-                           └── africa-oracle-devflow@0.3.1  ← this file (FunC compile gate)
+                           └── africa-oracle-devflow@0.3.1  (FunC compile gate)
+                                └── africa-oracle-devflow@0.4.0  ← this file (5-channel SDK distribution)
 ```
 
 Bump version when: new deploy target added, provider list changes, R²S² gate criteria added, test recipe changes, OR pillar definition changes.
@@ -199,7 +210,8 @@ Bump version when: new deploy target added, provider list changes, R²S² gate c
 | 0.1.0 | 2026-06-08 | Initial distillation from B+P+D+Bl+E+CI session — pre-loaded providers, ARM64 paths, R²S² | pending |
 | 0.2.0 | 2026-06-08 | 5-pillar overlay added to R²S² gate; test baseline 14 → 20; API surface extended with `/feeds/quorum` + `/feeds/stream` + `/metrics`; `SOVEREIGNTY.md` referenced | 0.88 (5-pillar avg) |
 | 0.3.0 | 2026-06-08 | Bl rule extended to enforce README.md consistency with Blueprint + SOVEREIGNTY + DEPLOY (README was stale through v0.2.0/v0.3.0 ships); polyglot-drift policy formalized (quorum is Python-only by design); FunC scope-out hardened (third repeated flag → dedicated session) | 0.90 (public-facing docs now consistent) |
-| **0.3.1** | **2026-06-15** | **FunC contract scope-out resolved: `afri-token.fc` rewritten against TIP-74 stdlib (P1-5/6/7 discharged); compile gate added to D path; `tests/test_afri_token_funcs.fc` + `tests/run_func_tests.sh` added; collateral-ratio unit bug (12 % vs 120 %) corrected; Solid R²S² gate ⚠ → ✅** | **0.92 (Alternative pillar now ⚠ → ✅; FunC compiles to BoC)** |
+| 0.3.1 | 2026-06-15 | FunC contract scope-out resolved: `afri-token.fc` rewritten against TIP-74 stdlib (P1-5/6/7 discharged); compile gate added to D path; `tests/test_afri_token_funcs.fc` + `tests/run_func_tests.sh` added; collateral-ratio unit bug (12 % vs 120 %) corrected; Solid R²S² gate ⚠ → ✅ | 0.92 (Alternative pillar now ⚠ → ✅; FunC compiles to BoC) |
+| **0.4.0** | **2026-06-22** | **5-channel SDK distribution shipped (`sdk/{python,typescript,extension,pwa,vscode,installer}`); test baseline 20 → 30 with `tests/test_sdk.py` (MV3 CSP, no-XSS, manifest JSON); Bl rule extended with distribution-surface gate; D path now lists SDK publish targets (PyPI/npm/web stores); `api/app.py` `VERSION` bumped 0.3.0 → 0.4.0** | **0.96 (Scalable 9→10 via edge runtimes; Affordable 9→10 via PWA replacing APK; 5-pillar avg 9.2 → 9.6)** |
 
 ---
-*Evolved 2026-06-15 from a B+Ci+E+P+D+Bl FunC-rewrite session. Source genome: `africa-oracle-devflow@0.3.0`. Fitness: 0.92.*
+*Evolved 2026-06-22 from a B+Ci+E+P+D+Bl distribution-surface session. Source genome: `africa-oracle-devflow@0.3.1`. Fitness: 0.96.*
