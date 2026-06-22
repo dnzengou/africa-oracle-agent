@@ -5,8 +5,10 @@
  * with a global `fetch`. No deps.
  */
 
+declare const process: { env: Record<string, string | undefined> } | undefined;
+
 export const DEFAULT_BASE_URL =
-  (typeof process !== "undefined" && process.env?.AFRICA_ORACLE_URL) ||
+  (typeof process !== "undefined" && process?.env?.AFRICA_ORACLE_URL) ||
   "https://africa-oracle.fly.dev";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
