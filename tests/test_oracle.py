@@ -182,3 +182,126 @@ def test_api_hunt_rejects_unknown_provider():
     client = TestClient(app)
     r = client.post("/hunt", json={"provider": "zelle", "country": "US"})
     assert r.status_code == 400
+
+
+# ─── Tukey-fence outlier filter (Resilient pillar — manipulation defense) ────
+
+
+def test_tukey_bounds_drops_obvious_outlier():
+    """Classic textbook case: 7 clustered values + 1 wild outlier → outlier
+    falls outside the fence."""
+    lo, hi = OracleAggregator._tukey_bounds(
+        [100.0, 101.0, 99.0, 100.5, 99.5, 100.2, 100.8, 5000.0]
+    )
+    assert lo < 100 < hi
+    assert hi < 5000  # outlier rejected
+
+
+def test_tukey_bounds_skips_small_samples():
+    """Fewer than 4 samples → IQR is meaningless; return open bounds."""
+    lo, hi = OracleAggregator._tukey_bounds([100.0, 200.0, 50.0])
+    assert lo == float("-inf")
+    assert hi == float("inf")
+
+
+def test_tukey_bounds_keeps_clustered_feeds():
+    """All clustered within IQR → both bounds accept the cluster."""
+    vals = [150.0, 150.1, 149.9, 150.2, 149.8, 150.05]
+    lo, hi = OracleAggregator._tukey_bounds(vals)
+    for v in vals:
+        assert lo <= v <= hi
+
+
+def test_robust_quorum_runs_end_to_end():
+    """Smoke-test the full pipeline: feeds in, prices + outliers_dropped out."""
+    agg = OracleAggregator()
+    agg.add_agent(OracleAgent("safaricom", "KE"))
+    agg.add_agent(OracleAgent("airtel", "KE"))
+    agg.add_agent(OracleAgent("safaricom", "TZ"))  # TZS, only safaricom
+    out = agg.robust_quorum_aggregate(min_providers=2, tukey_k=1.5)
+    assert out["quorum_threshold"] == 2
+    assert out["tukey_k"] == 1.5
+    assert "outliers_dropped" in out
+    assert isinstance(out["outliers_dropped"], list)
+    assert out["agents_kept"] <= out["agents_reporting"]
+    currencies = {p["currency"] for p in out["prices"]}
+    assert "KES" in currencies   # 2 providers, passes quorum
+    assert "TZS" not in currencies  # only 1 provider, fails quorum
+    failed = {p["currency"] for p in out["quorum_failed"]}
+    assert "TZS" in failed
+
+
+def test_robust_quorum_drops_planted_outlier():
+    """Inject a synthetic outlier directly into a feed group via a stub agent
+    and confirm robust_quorum_aggregate filters it out before consensus."""
+
+    class StubAgent:
+        def __init__(self, feed):
+            self._feed = feed
+            self.agent_id = feed.get("agent_id", "stub")
+
+        def fetch_price(self):
+            return self._feed
+
+    base_feed = {
+        "provider": "Test", "provider_slug": "t",
+        "country": "XX", "currency": "TST",
+        "timestamp": 0, "datetime": "2026-01-01T00:00:00+00:00",
+        "spread": 0.005, "spread_bps": 50,
+        "volume_24h": 1_000_000, "confidence": 0.9,
+        "sources": 100, "agent_id": "a", "simulated": True,
+    }
+
+    def feed(provider, mid, agent_id):
+        return {**base_feed, "provider": provider, "agent_id": agent_id,
+                "buy_price": mid * 0.998, "sell_price": mid * 1.002,
+                "mid_price": mid}
+
+    agg = OracleAggregator()
+    # 7 clustered around 100 + 1 wild outlier at 1000 (realistic multi-agent
+    # density — see _tukey_bounds() docstring on N≥6 reliability)
+    cluster = [
+        ("MTN-A", 100.0), ("MTN-B", 99.9),
+        ("Safaricom-A", 100.5), ("Safaricom-B", 100.1),
+        ("Airtel", 99.8),
+        ("Orange-A", 100.2), ("Orange-B", 100.3),
+        ("Compromised", 1000.0),
+    ]
+    for i, (prov, mid) in enumerate(cluster):
+        agg.agents.append(StubAgent(feed(prov, mid, f"a{i}")))
+
+    out = agg.robust_quorum_aggregate(min_providers=2, tukey_k=1.5)
+    # The wild outlier must be dropped
+    dropped_providers = {o["provider"] for o in out["outliers_dropped"]}
+    assert "Compromised" in dropped_providers
+    # Consensus mid_price must be near the cluster, not skewed by the outlier
+    tst = next(p for p in out["prices"] if p["currency"] == "TST")
+    assert 99.0 < tst["mid_price"] < 101.0
+    assert tst["agent_count"] == 7  # outlier excluded
+
+
+def test_api_robust_endpoint():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/feeds/robust", json={"min_providers": 2, "tukey_k": 1.5})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["quorum_threshold"] == 2
+    assert body["tukey_k"] == 1.5
+    assert isinstance(body["prices"], list)
+    assert isinstance(body["outliers_dropped"], list)
+    assert "agents_kept" in body
+
+
+def test_api_robust_rejects_invalid_tukey():
+    from fastapi.testclient import TestClient
+
+    from api.app import app
+
+    client = TestClient(app)
+    # tukey_k above the upper bound (3.0)
+    r = client.post("/feeds/robust", json={"min_providers": 2, "tukey_k": 10})
+    assert r.status_code == 422

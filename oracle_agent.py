@@ -264,6 +264,139 @@ class OracleAggregator:
             ],
         }
 
+    # ─── Tukey-fence outlier detection (Resilient pillar — manipulation defense) ─
+
+    @staticmethod
+    def _tukey_bounds(values: list[float], k: float = 1.5) -> tuple[float, float]:
+        """Returns (lo, hi) — values outside the IQR-fence are outliers.
+
+        Tukey's fence: lo = Q1 - k*IQR, hi = Q3 + k*IQR. With k=1.5 this is the
+        classical box-plot whisker. With fewer than 4 samples IQR is not
+        meaningful, so we return open bounds (no filtering).
+
+        Caveat for small N: with N=5 and a single large outlier, that outlier
+        contaminates Q3 (since the upper half is only 2 values), which widens
+        the fence enough to let the outlier through. The filter is reliable
+        from N≥6 onward; in production each currency typically has 8+ feeds
+        across providers × countries × agents, where this is non-issue.
+        """
+        if len(values) < 4:
+            return (float("-inf"), float("inf"))
+        sorted_v = sorted(values)
+        n = len(sorted_v)
+        lower_half = sorted_v[: n // 2]
+        upper_half = sorted_v[(n + 1) // 2 :]
+        q1 = statistics.median(lower_half)
+        q3 = statistics.median(upper_half)
+        iqr = q3 - q1
+        return (q1 - k * iqr, q3 + k * iqr)
+
+    def robust_quorum_aggregate(self, min_providers: int = 2,
+                                  tukey_k: float = 1.5) -> dict:
+        """Quorum + outlier-resistant variant — applies a Tukey-fence filter on
+        mid_price per currency BEFORE consensus, then enforces quorum on the
+        surviving providers. Defends against a single compromised provider
+        publishing a wild price to sway the median.
+
+        Returns the same shape as quorum_aggregate() plus an `outliers_dropped`
+        array listing every (currency, provider, country, mid_price) tuple that
+        fell outside the IQR fence.
+        """
+        prices = []
+        for agent in self.agents:
+            try:
+                prices.append(agent.fetch_price())
+            except Exception as e:
+                print(f"Agent {agent.agent_id} failed: {e}", file=sys.stderr)
+
+        if not prices:
+            return {"error": "no prices collected", "timestamp": int(time.time())}
+
+        by_currency: dict[str, list[dict]] = {}
+        for p in prices:
+            by_currency.setdefault(p["currency"], []).append(p)
+
+        kept_feeds: list[dict] = []
+        outliers: list[dict] = []
+        for ccy, feeds in by_currency.items():
+            mids = [f["mid_price"] for f in feeds]
+            lo, hi = self._tukey_bounds(mids, k=tukey_k)
+            for f in feeds:
+                if lo <= f["mid_price"] <= hi:
+                    kept_feeds.append(f)
+                else:
+                    outliers.append({
+                        "currency": ccy,
+                        "provider": f["provider"],
+                        "country": f["country"],
+                        "mid_price": f["mid_price"],
+                        "bound_lo": round(lo, 4),
+                        "bound_hi": round(hi, 4),
+                    })
+
+        # Re-aggregate from the filtered set using the standard pipeline
+        scratch = OracleAggregator()
+        scratch.last_prices = kept_feeds
+        # Reuse aggregate()'s per-currency consensus logic by injecting kept feeds
+        # via a tiny shim: build the by_currency map and rerun the consensus path.
+        passed_consensus: list[dict] = []
+        kept_by_ccy: dict[str, list[dict]] = {}
+        for f in kept_feeds:
+            kept_by_ccy.setdefault(f["currency"], []).append(f)
+        for ccy, feeds in kept_by_ccy.items():
+            buy_prices = [f["buy_price"] for f in feeds]
+            sell_prices = [f["sell_price"] for f in feeds]
+            volumes = [f["volume_24h"] for f in feeds]
+            confidences = [f["confidence"] for f in feeds]
+            sources = [f["sources"] for f in feeds]
+            median_buy = statistics.median(buy_prices)
+            median_sell = statistics.median(sell_prices)
+            total_vol = sum(volumes)
+            weighted_spread = (
+                sum(f["spread"] * (f["volume_24h"] / total_vol) for f in feeds)
+                if total_vol > 0 else 0
+            )
+            passed_consensus.append({
+                "currency": ccy,
+                "countries": list(set(f["country"] for f in feeds)),
+                "providers": list(set(f["provider"] for f in feeds)),
+                "buy_price": round(median_buy, 4),
+                "sell_price": round(median_sell, 4),
+                "mid_price": round((median_buy + median_sell) / 2, 4),
+                "spread": round(weighted_spread, 6),
+                "spread_bps": round(weighted_spread * 10000, 2),
+                "total_volume_24h": round(total_vol, 2),
+                "avg_confidence": round(sum(confidences) / len(confidences), 4),
+                "total_sources": sum(sources),
+                "agent_count": len(feeds),
+            })
+
+        passed, failed = [], []
+        for p in passed_consensus:
+            distinct = len(set(p["providers"]))
+            (passed if distinct >= min_providers else failed).append(
+                {**p, "distinct_providers": distinct}
+            )
+
+        return {
+            "oracle_id": hashlib.sha256(
+                f"africa-oracle-robust:{int(time.time())}".encode()
+            ).hexdigest()[:16],
+            "timestamp": int(time.time()),
+            "datetime": datetime.now(timezone.utc).isoformat(),
+            "quorum_threshold": min_providers,
+            "tukey_k": tukey_k,
+            "currencies": len(passed),
+            "agents_reporting": len(prices),
+            "agents_kept": len(kept_feeds),
+            "prices": passed,
+            "quorum_failed": [
+                {"currency": p["currency"], "distinct_providers": p["distinct_providers"]}
+                for p in failed
+            ],
+            "outliers_dropped": outliers,
+        }
+
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 

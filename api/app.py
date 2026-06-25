@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from oracle_agent import PROVIDERS, OracleAgent, OracleAggregator  # noqa: E402
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 app = FastAPI(
     title="Africa Oracle Extraction Agent",
@@ -46,14 +46,22 @@ class QuorumRequest(BaseModel):
     min_providers: int = Field(default=2, ge=1, le=4)
 
 
+class RobustRequest(BaseModel):
+    min_providers: int = Field(default=2, ge=1, le=4)
+    tukey_k: float = Field(default=1.5, ge=0.5, le=3.0,
+                            description="Tukey-fence multiplier; 1.5 = classical box-plot whisker")
+
+
 # ─── In-process counters (Prometheus-style) ──────────────────────────────────
 _metrics = {
     "hunt_requests_total": 0,
     "hunt_errors_total": 0,
     "feeds_all_requests_total": 0,
     "feeds_quorum_requests_total": 0,
+    "feeds_robust_requests_total": 0,
     "feeds_stream_connections_total": 0,
     "feeds_quorum_failed_total": 0,
+    "feeds_outliers_dropped_total": 0,
 }
 
 
@@ -119,6 +127,19 @@ async def feeds_quorum(req: QuorumRequest) -> dict:
         _build_aggregator().quorum_aggregate, req.min_providers
     )
     _metrics["feeds_quorum_failed_total"] += len(result.get("quorum_failed", []))
+    return result
+
+
+@app.post("/feeds/robust")
+async def feeds_robust(req: RobustRequest) -> dict:
+    """Resilient pillar — quorum + Tukey-fence outlier filter on mid_price."""
+    _metrics["feeds_robust_requests_total"] += 1
+    result = await asyncio.to_thread(
+        _build_aggregator().robust_quorum_aggregate,
+        req.min_providers, req.tukey_k,
+    )
+    _metrics["feeds_quorum_failed_total"] += len(result.get("quorum_failed", []))
+    _metrics["feeds_outliers_dropped_total"] += len(result.get("outliers_dropped", []))
     return result
 
 

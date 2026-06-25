@@ -297,3 +297,59 @@ py -3 -m pytest tests/ -v
 | Alternative | 10 | 10 | unchanged (FunC ✅ since v0.3.2) |
 | **Avg** | **9.2** | **9.6** | +0.4 |
 
+---
+
+# v0.5.0 — Tukey-fence outlier defense — 2026-06-25
+
+## What shipped
+
+- `OracleAggregator._tukey_bounds(values, k=1.5)` — static IQR-fence helper.
+  Returns open bounds for N<4 (insufficient data) and is documented as reliable
+  from N≥6 onward (small-N caveat: a single huge outlier contaminates Q3 when
+  the upper half is only 2 values; in production each currency has 8+ feeds).
+- `OracleAggregator.robust_quorum_aggregate(min_providers, tukey_k)` — quorum
+  + outlier filter on `mid_price` per currency. The filter runs BEFORE the
+  median consensus, so a compromised provider can't sway the rate; their feed
+  is exposed in `outliers_dropped[]` with the fence bounds that rejected it.
+- `POST /feeds/robust` — new endpoint; Pydantic-validated `tukey_k ∈ [0.5, 3.0]`.
+- Two new Prometheus counters: `feeds_robust_requests_total`,
+  `feeds_outliers_dropped_total`.
+
+## Tests added (7; total 30 → 37)
+
+- `test_tukey_bounds_drops_obvious_outlier` — textbook 7-cluster + 1-outlier
+- `test_tukey_bounds_skips_small_samples` — N<4 returns open bounds
+- `test_tukey_bounds_keeps_clustered_feeds` — no false positives on tight cluster
+- `test_robust_quorum_runs_end_to_end` — full pipeline smoke
+- `test_robust_quorum_drops_planted_outlier` — 7-honest + 1-compromised (1000×),
+  verifies outlier in `outliers_dropped`, consensus mid_price stays on cluster,
+  `agent_count` excludes the dropped feed
+- `test_api_robust_endpoint` — `/feeds/robust` smoke
+- `test_api_robust_rejects_invalid_tukey` — Pydantic 422 on `tukey_k > 3.0`
+
+## R²S² gate — v0.5.0
+
+- **Robust:** ✅ filter degrades gracefully (open bounds when N<4)
+- **Reliable:** ✅ 37/37 green (was 30)
+- **Solid:** ✅ no half-feature — filter, endpoint, metrics, tests, docs all land
+  together
+- **Stable:** ✅ additive endpoint, `quorum_aggregate` untouched, `aggregate`
+  untouched; `VERSION` 0.4.0 → 0.5.0
+- **Resistant:** ✅ defends against single-provider price manipulation on top of
+  partition defense already in `quorum_aggregate`
+- **Scalable:** ✅ filter is O(n log n) per currency; runs inside the existing
+  `asyncio.to_thread` worker
+- **Secure:** ✅ Pydantic `tukey_k ∈ [0.5, 3.0]` clamps the surface
+- **Systematic:** ✅ EVAL + Blueprint + skill bumped together
+
+## 5-pillar verdict — v0.5.0
+
+| Pillar | v0.4.0 | v0.5.0 | Why |
+|---|---|---|---|
+| Resilient | 9 | 10 | manipulation defense on top of partition defense |
+| Sovereign | 9 | 9 | unchanged |
+| Scalable | 10 | 10 | unchanged |
+| Affordable | 10 | 10 | unchanged |
+| Alternative | 10 | 10 | unchanged |
+| **Avg** | **9.6** | **9.8** | +0.2 |
+

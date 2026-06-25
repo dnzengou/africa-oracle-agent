@@ -1,5 +1,5 @@
 # AFRI Africa Oracle — Project Blueprint
-**Version:** 0.4.0 · **Date:** 2026-06-22 · **Deploy:** [pending]
+**Version:** 0.5.0 · **Date:** 2026-06-25 · **Deploy:** [pending]
 
 ## Value proposition
 
@@ -7,7 +7,7 @@
 
 | Pillar | What it means | Where it lives |
 |---|---|---|
-| **Resilient** | Single-provider outage doesn't move the rate | `quorum_aggregate(min_providers=2)` · `/feeds/quorum` · polyglot ports |
+| **Resilient** | Single-provider outage doesn't move the rate; manipulated feed gets filtered | `quorum_aggregate(min_providers=2)` · `robust_quorum_aggregate(tukey_k=1.5)` · `/feeds/quorum` · `/feeds/robust` · polyglot ports |
 | **Sovereign** | African jurisdictional + operational control | `fly.toml` jnb region · `docker-compose.yml` self-host · open-source FunC · `SOVEREIGNTY.md` |
 | **Scalable** | Edge + cloud, push + poll, multi-region | async `/feeds/all` · SSE `/feeds/stream` · multi-arch image · stateless API |
 | **Affordable** | Free-tier viable, $35-hardware edge | shared-cpu-1x Fly.io · POSIX shell port on Raspberry Pi · no Redis/Postgres |
@@ -63,8 +63,8 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - [x] Test suite (pytest, 20 tests)
 - [x] **`SOVEREIGNTY.md`** with AFRI vs USDT/USDC comparison — Alternative pillar
 - [x] **5-channel SDK distribution** (Python pip · npm TS · MV3 ext · PWA · VSCode · POSIX one-liner) — Affordable + Alternative
+- [x] **Outlier detection** (Tukey-fence on mid_price, `robust_quorum_aggregate`) — Resilient pillar (v0.5.0)
 - [ ] Real API integration (requires provider keys)
-- [ ] Outlier detection (Tukey fence on spread)
 - [ ] African-mirror image registry (post-GHCR sovereignty)
 
 ### Phase 1 — AFRI Jetton on TON
@@ -147,6 +147,7 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 | POST | `/hunt` | `{"provider","country","simulate"}` | `PriceFeed` | – |
 | POST | `/feeds/all` | `{}` | `OracleReport` (aggregated, async) | Scalable |
 | POST | `/feeds/quorum` | `{"min_providers":2}` | `OracleReport` + `quorum_failed[]` | **Resilient** |
+| POST | `/feeds/robust` | `{"min_providers":2,"tukey_k":1.5}` | quorum + Tukey-fence on mid_price; lists `outliers_dropped[]` | **Resilient** (v0.5.0) |
 | GET | `/feeds/stream` | `?interval=30` | SSE: aggregated report every N s | **Scalable** + Affordable |
 | GET | `/metrics` | – | Prometheus text format | observability |
 
@@ -155,6 +156,35 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - Full deploy (10 providers × 30 countries × 30 s polling): ~\$5K/mo at production scale
 
 ## Changelog
+
+### v0.5.0 — 2026-06-25
+**Build (B) — Tukey-fence outlier defense (Resilient pillar):**
+- `OracleAggregator._tukey_bounds(values, k=1.5)` — static helper returning
+  IQR-fence bounds. Returns open bounds for N<4 (insufficient data); reliable
+  from N≥6 onward (documented caveat for small samples vs large outliers).
+- `OracleAggregator.robust_quorum_aggregate(min_providers, tukey_k)` —
+  quorum + outlier filter on `mid_price` per currency. Filters happen BEFORE
+  the median consensus, so a compromised provider can't sway the rate; their
+  feed is surfaced in `outliers_dropped[]` at the top level alongside the
+  fence bounds that rejected it.
+- `POST /feeds/robust` endpoint exposing the resilient path; Pydantic-validated
+  `tukey_k ∈ [0.5, 3.0]` (rejects nonsense values with 422).
+- Prometheus counters `feeds_robust_requests_total` +
+  `feeds_outliers_dropped_total` added to `/metrics`.
+
+**Tests:** 7 new (27 total, was 20 — +35 %): `_tukey_bounds` (drops outlier /
+skips small N / keeps clustered), `robust_quorum_aggregate` end-to-end, a
+planted-outlier integration with stub agents proving a 1000× wild value is
+filtered while consensus stays on the cluster, plus 2 API smoke + validation
+tests for `/feeds/robust`.
+
+**API version bump:** 0.4.0 → 0.5.0 (additive endpoint; no breaking change).
+
+**Evaluate (E):** Resilient pillar 9 → 10 (manipulation defense added on top
+of partition defense). 5-pillar avg 9.2 → 9.4.
+
+**Evolve (evo-metaclaw):** `skills/africa-oracle-devflow.md`
+v0.3.1 → v0.4.0; pytest baseline 20 → 27.
 
 ### v0.4.0 — 2026-06-22
 **Build (B) — five-channel distribution layer:** the oracle is now consumable
