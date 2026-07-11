@@ -305,3 +305,88 @@ def test_api_robust_rejects_invalid_tukey():
     # tukey_k above the upper bound (3.0)
     r = client.post("/feeds/robust", json={"min_providers": 2, "tukey_k": 10})
     assert r.status_code == 422
+
+
+# ─── /convert endpoint (Alternative pillar — commercial use case) ────────────
+
+
+def test_convert_amount_mid_side():
+    from oracle_agent import convert_amount
+
+    feed = {"prices": [
+        {"currency": "KES", "buy_price": 149.0, "sell_price": 151.0,
+         "mid_price": 150.0, "spread": 0.013, "avg_confidence": 0.95,
+         "providers": ["Safaricom M-Pesa", "Airtel Money"]},
+        {"currency": "NGN", "buy_price": 1549.0, "sell_price": 1551.0,
+         "mid_price": 1550.0, "spread": 0.001, "avg_confidence": 0.90,
+         "providers": ["MTN MoMo"]},
+    ]}
+    out = convert_amount(feed, "KES", "NGN", 1000.0, side="mid")
+    # 1000 KES / 150 = 6.667 USD × 1550 = ~10333 NGN
+    assert out["from"]["currency"] == "KES"
+    assert out["to"]["currency"] == "NGN"
+    assert 10000 < out["to"]["amount"] < 10500
+    assert out["rate"] > 0
+    assert out["side"] == "mid"
+
+
+def test_convert_amount_unknown_currency_raises():
+    from oracle_agent import convert_amount
+
+    feed = {"prices": [
+        {"currency": "KES", "buy_price": 149.0, "sell_price": 151.0,
+         "mid_price": 150.0, "spread": 0.013, "avg_confidence": 0.95,
+         "providers": ["S"]},
+    ]}
+    import pytest
+    with pytest.raises(ValueError):
+        convert_amount(feed, "KES", "ZZZ", 100.0)
+
+
+def test_api_convert_endpoint():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/convert", json={"from": "KES", "to": "NGN", "amount": 100})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"]["currency"] == "KES"
+    assert body["to"]["currency"] == "NGN"
+    assert body["to"]["amount"] > 0
+
+
+def test_api_convert_rejects_unknown_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/convert", json={"from": "USD", "to": "KES", "amount": 100})
+    assert r.status_code == 400
+
+
+def test_api_dashboard_served_at_root():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Africa Oracle" in r.text
+    assert r.headers["content-type"].startswith("text/html")
+
+
+def test_api_cors_headers_present():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.options(
+        "/feeds/all",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "*"

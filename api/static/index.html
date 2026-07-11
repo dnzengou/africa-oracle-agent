@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#0b1220" />
+<title>Africa Oracle · Live Mobile-Money FX</title>
+<meta name="description" content="Resilient mobile-money price oracle for African currencies. Live median FX rates from M-Pesa, MTN, Orange, Airtel." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🌍%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f8fb;
+    --fg: #0b1220;
+    --muted: #5c6473;
+    --card: #ffffff;
+    --border: #e5e9f0;
+    --accent: #d97706;
+    --accent-fg: #ffffff;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --err: #dc2626;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220;
+      --fg: #e6ebf5;
+      --muted: #8b93a7;
+      --card: #131b2e;
+      --border: #1f2a44;
+      --accent: #f59e0b;
+      --accent-fg: #0b1220;
+    }
+  }
+  :root[data-theme=dark] {
+    --bg: #0b1220; --fg: #e6ebf5; --muted: #8b93a7;
+    --card: #131b2e; --border: #1f2a44; --accent: #f59e0b; --accent-fg: #0b1220;
+  }
+  :root[data-theme=light] {
+    --bg: #f6f8fb; --fg: #0b1220; --muted: #5c6473;
+    --card: #ffffff; --border: #e5e9f0; --accent: #d97706; --accent-fg: #ffffff;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: var(--sans);
+    background: var(--bg); color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 24px 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1100px; margin: 0 auto;
+  }
+  header h1 {
+    margin: 0; font-size: 20px; letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  header h1 .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  header .meta {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 60px; }
+  h2 { font-size: 15px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); margin: 28px 0 12px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+  }
+  .grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  .rate {
+    display: flex; flex-direction: column; gap: 6px;
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; background: var(--card);
+  }
+  .rate .ccy {
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .rate .code { font-weight: 600; letter-spacing: 0.02em; }
+  .rate .agents { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .rate .mid { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+  .rate .row { display: flex; gap: 12px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .rate .row span { display: inline-flex; gap: 4px; }
+  .rate .row b { color: var(--fg); font-weight: 500; }
+  .rate .quorum { font-size: 11px; color: var(--ok); }
+  .rate .quorum.fail { color: var(--warn); }
+  .converter {
+    display: grid; gap: 10px;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: end;
+  }
+  @media (max-width: 640px) {
+    .converter { grid-template-columns: 1fr; }
+    .converter .swap { justify-self: center; }
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .field .input {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .field input, .field select {
+    background: transparent; border: 0; outline: 0;
+    color: var(--fg); font: inherit; width: 100%;
+    font-family: var(--mono);
+  }
+  .field select { font-family: var(--sans); font-weight: 600; }
+  .field .input:focus-within { border-color: var(--accent); }
+  .swap {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--fg); width: 40px; height: 40px; border-radius: 50%;
+    cursor: pointer; font-size: 16px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .swap:hover { background: var(--bg); }
+  .result {
+    margin-top: 16px; padding: 14px 16px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 10px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .result .big { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+  .result .details { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .btn {
+    background: var(--accent); color: var(--accent-fg);
+    border: 0; padding: 10px 16px; border-radius: 8px;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  footer {
+    max-width: 1100px; margin: 0 auto; padding: 20px 24px 40px;
+    font-size: 12px; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); }
+  .toggle {
+    background: transparent; border: 1px solid var(--border); color: var(--fg);
+    padding: 4px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .err { color: var(--err); font-family: var(--mono); font-size: 12px; padding: 8px 0; }
+  .skeleton {
+    background: linear-gradient(90deg, var(--border) 0%, color-mix(in srgb, var(--border) 60%, var(--card)) 50%, var(--border) 100%);
+    background-size: 200% 100%;
+    animation: sk 1.5s infinite;
+    border-radius: 4px; height: 14px;
+  }
+  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot"></span>Africa Oracle</h1>
+  <div class="meta">
+    <span id="ver">…</span> ·
+    <span id="clock">…</span>
+    <button class="toggle" id="themeToggle" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Currency converter</h2>
+    <div class="card">
+      <div class="converter">
+        <div class="field">
+          <label for="fromCcy">You send</label>
+          <div class="input">
+            <input type="number" id="amount" value="100" step="1" min="0.01" inputmode="decimal" aria-label="Amount"/>
+            <select id="fromCcy" aria-label="From currency"></select>
+          </div>
+        </div>
+        <button class="swap" id="swap" title="Swap" aria-label="Swap currencies">⇅</button>
+        <div class="field">
+          <label for="toCcy">Recipient gets</label>
+          <div class="input">
+            <input type="text" id="result" readonly aria-label="Converted amount"/>
+            <select id="toCcy" aria-label="To currency"></select>
+          </div>
+        </div>
+      </div>
+      <div class="result">
+        <div>
+          <div class="big" id="resultBig">—</div>
+          <div class="details" id="resultDetails">Enter amount to compute</div>
+        </div>
+        <div class="details" id="resultRate">rate: —</div>
+      </div>
+      <div class="err" id="convErr"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Live rates <span style="font-family:var(--mono);font-size:11px;text-transform:none;color:var(--muted);">— median across providers, USD-quoted</span></h2>
+    <div class="grid" id="rates">
+      <div class="rate"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div></div>
+      <div class="rate"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div></div>
+      <div class="rate"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div>
+    <a href="/docs">API docs</a> ·
+    <a href="/metrics">metrics</a> ·
+    <a href="/feeds/stream">SSE stream</a>
+  </div>
+  <div>Phase 0 · <span id="providers">…</span> providers · <a href="https://github.com/nzengou/africa-oracle-agent" rel="noopener">source</a></div>
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const API = (path, opts={}) => fetch(path, {
+    ...opts, headers: {"Content-Type": "application/json", ...(opts.headers||{})}
+  }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || r.statusText); }));
+
+  const state = { feed: null, ccys: [], theme: localStorage.getItem("theme") || null };
+
+  if (state.theme) document.documentElement.dataset.theme = state.theme;
+  $("themeToggle").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+  };
+
+  const fmt = (n, d=2) => new Intl.NumberFormat(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}).format(n);
+  const tick = () => $("clock").textContent = new Date().toLocaleTimeString();
+  setInterval(tick, 1000); tick();
+
+  async function loadHealth() {
+    try {
+      const h = await API("/health");
+      $("ver").textContent = "v" + h.version;
+      $("providers").textContent = h.providers;
+    } catch (e) { $("ver").textContent = "offline"; }
+  }
+
+  async function loadFeed() {
+    try {
+      const feed = await API("/feeds/robust", {
+        method: "POST",
+        body: JSON.stringify({min_providers: 2, tukey_k: 1.5})
+      });
+      state.feed = feed;
+      state.ccys = feed.prices.map(p => p.currency).sort();
+      renderRates(feed);
+      populateSelects();
+      compute();
+    } catch (e) {
+      $("rates").innerHTML = `<div class="err">Failed to load rates: ${e.message}</div>`;
+    }
+  }
+
+  function renderRates(feed) {
+    const rows = feed.prices.map(p => {
+      const distinct = p.distinct_providers || (new Set(p.providers)).size;
+      const q = distinct >= 2;
+      return `<div class="rate">
+        <div class="ccy">
+          <span class="code">${p.currency}</span>
+          <span class="agents">${p.agent_count} agents · ${p.countries.join(",")}</span>
+        </div>
+        <div class="mid">${fmt(p.mid_price, 4)}</div>
+        <div class="row">
+          <span>buy <b>${fmt(p.buy_price, 4)}</b></span>
+          <span>sell <b>${fmt(p.sell_price, 4)}</b></span>
+          <span>spread <b>${fmt(p.spread_bps, 1)}bps</b></span>
+        </div>
+        <div class="quorum ${q ? "" : "fail"}">${q ? "✓" : "⚠"} ${distinct} providers · ${fmt(p.avg_confidence * 100, 1)}% confidence</div>
+      </div>`;
+    });
+    $("rates").innerHTML = rows.join("") || `<div class="err">No rates passed quorum.</div>`;
+  }
+
+  function populateSelects() {
+    const opts = state.ccys.map(c => `<option value="${c}">${c}</option>`).join("");
+    const from = $("fromCcy"), to = $("toCcy");
+    const prevF = from.value, prevT = to.value;
+    from.innerHTML = opts; to.innerHTML = opts;
+    from.value = prevF && state.ccys.includes(prevF) ? prevF : (state.ccys.includes("KES") ? "KES" : state.ccys[0]);
+    to.value = prevT && state.ccys.includes(prevT) ? prevT : (state.ccys.includes("NGN") ? "NGN" : state.ccys[1] || state.ccys[0]);
+  }
+
+  let debounce;
+  function compute() {
+    clearTimeout(debounce);
+    debounce = setTimeout(_compute, 150);
+  }
+  async function _compute() {
+    const amount = parseFloat($("amount").value);
+    const from = $("fromCcy").value, to = $("toCcy").value;
+    if (!amount || !from || !to || from === to) {
+      $("result").value = amount || "";
+      $("resultBig").textContent = amount ? fmt(amount, 2) + " " + (to || "") : "—";
+      $("resultDetails").textContent = from === to ? "Same currency" : "Pick two currencies";
+      $("resultRate").textContent = "rate: —";
+      $("convErr").textContent = "";
+      return;
+    }
+    try {
+      const r = await API("/convert", {
+        method: "POST",
+        body: JSON.stringify({from, to, amount, side: "mid"})
+      });
+      $("result").value = fmt(r.to.amount, 4);
+      $("resultBig").textContent = fmt(r.to.amount, 2) + " " + r.to.currency;
+      $("resultDetails").textContent = `${fmt(amount, 2)} ${from} · confidence ${fmt(r.confidence * 100, 0)}% · spread ${fmt(r.spread_bps, 1)}bps`;
+      $("resultRate").textContent = `1 ${from} = ${fmt(r.rate, 6)} ${to}`;
+      $("convErr").textContent = "";
+    } catch (e) {
+      $("convErr").textContent = e.message;
+    }
+  }
+
+  $("amount").addEventListener("input", compute);
+  $("fromCcy").addEventListener("change", compute);
+  $("toCcy").addEventListener("change", compute);
+  $("swap").addEventListener("click", () => {
+    const f = $("fromCcy").value, t = $("toCcy").value;
+    $("fromCcy").value = t; $("toCcy").value = f; compute();
+  });
+
+  loadHealth();
+  loadFeed();
+  setInterval(loadFeed, 15000);
+</script>
+</body>
+</html>

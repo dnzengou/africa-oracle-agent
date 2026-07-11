@@ -3,7 +3,7 @@
 > **A resilient, sovereign, scalable, affordable alternative to foreign fiat-backed stablecoins.**
 > Phase 0 of the AFRI Jetton (TIP-74 on TON) — mobile-money-native price oracle for ~30 African countries.
 
-[![tests](https://img.shields.io/badge/tests-30%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]()
+[![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.6.0-black)]()
 
 ## What it does
 
@@ -57,7 +57,7 @@ curl -s -X POST http://localhost:8000/feeds/quorum \
   -d '{"min_providers":2}'
 
 # Tests
-py -3 -m pytest tests/ -v   # 20 passing
+py -3 -m pytest tests/ -v   # 37 passing
 
 # Self-host on any African VPS (Sovereign + Affordable)
 docker compose up -d
@@ -84,17 +84,22 @@ curl -fsSL https://raw.githubusercontent.com/nzengou/africa-oracle-agent/main/sd
 
 Build all artifacts at once: `bash sdk/build.sh` → `dist/`.
 
-## API endpoints (v0.4.0)
+## API endpoints (v0.6.0)
 
 | Method | Path | Pillar |
 |---|---|---|
+| `GET` | `/` | dashboard UI (self-contained, mobile-first, dark-mode aware) |
 | `GET` | `/health` | – |
 | `GET` | `/providers` | – |
 | `POST` | `/hunt` `{provider, country, simulate}` | – |
-| `POST` | `/feeds/all` | Scalable (async) |
+| `POST` | `/feeds/all` | Scalable (async, cached 10s) |
 | `POST` | `/feeds/quorum` `{min_providers}` | **Resilient** |
+| `POST` | `/feeds/robust` `{min_providers, tukey_k}` | **Resilient** (+ outlier filter) |
+| `POST` | `/convert` `{from, to, amount, side}` | **Alternative** (commercial use case) |
 | `GET` | `/feeds/stream?interval=N` | **Scalable** (SSE) |
 | `GET` | `/metrics` | observability |
+
+Production hardening in v0.6.0: 10 s TTL cache, CORS, per-IP rate limit (60 req/min), non-root Docker user.
 
 ## Deploy targets
 
@@ -119,7 +124,7 @@ Detailed instructions: [`DEPLOY.md`](DEPLOY.md).
 
 ## Roadmap
 
-- [x] **Phase 0** — Oracle Bootstrapping (v0.4.0): provider mapping · simulated feed · quorum aggregation · async API · SSE streaming · multi-arch image · self-host path · 5-channel SDK distribution
+- [x] **Phase 0** — Oracle Bootstrapping (v0.6.0): provider mapping · simulated feed · quorum + Tukey outlier filter · async API · SSE streaming · multi-arch image · self-host path · 5-channel SDK distribution · self-contained dashboard UI · `/convert` cross-currency endpoint · TTL cache · CORS · rate limit · non-root container
 - [ ] **Phase 1** — AFRI Jetton on TON testnet: FunC contract rewrite against TIP-74 stdlib · oracle-signed price feeds · bridge handshake
 - [ ] **Phase 2** — Production rollout: provider API keys + KYC at provider boundary · liquidity onboarding (STON.fi LP) · reserve audit publication · mainnet deploy
 

@@ -13,6 +13,10 @@ RUN pip install -r requirements.txt
 COPY oracle_agent.py ./
 COPY api ./api
 
+RUN adduser --system --uid 1001 --group --no-create-home oracle \
+ && chown -R oracle:oracle /app
+USER oracle
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
