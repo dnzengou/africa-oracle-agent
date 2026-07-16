@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Africa Oracle Extraction Agent v0.6.0
+Africa Oracle Extraction Agent v0.7.0
 
 Extracts real-time price feeds from mobile money aggregator APIs.
 Each agent polls one provider in one country and reports buy/sell prices.
@@ -75,6 +75,17 @@ REFERENCE_RATES = {
     "MZN": 64.00,  "SOS": 570.00,  "XOF": 610.00,  "XAF": 610.00,
     "MGA": 4600.00,"NGN": 1550.00, "ZMW": 25.00,
 }
+
+# Operators can refresh bootstrap rates without a redeploy:
+#   ORACLE_REFERENCE_RATES_JSON='{"NGN": 1600.0}' merges over the defaults.
+_rates_override = os.environ.get("ORACLE_REFERENCE_RATES_JSON")
+if _rates_override:
+    try:
+        REFERENCE_RATES.update({
+            k: float(v) for k, v in json.loads(_rates_override).items()
+        })
+    except (ValueError, TypeError, AttributeError) as e:
+        print(f"Ignoring invalid ORACLE_REFERENCE_RATES_JSON: {e}", file=sys.stderr)
 
 # ─── Oracle Agent ─────────────────────────────────────────────────────────────
 
@@ -399,8 +410,12 @@ def main():
     parser.add_argument("--country", help="Country code (e.g., KE, NG, GH)")
     parser.add_argument("--all", action="store_true",
                         help="Run all provider/country combinations")
-    parser.add_argument("--simulate", action="store_true", default=True,
-                        help="Simulate price data (default: True)")
+    parser.add_argument("--simulate", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Simulate price data (--no-simulate needs API keys)")
+    parser.add_argument("--evolved", action="store_true",
+                        help="Fitness-weighted consensus + trajectory capture "
+                             "(persists to $ORACLE_EVO_DIR, default ./evo-data)")
     parser.add_argument("--output", help="Output file (default: stdout)")
     parser.add_argument("--interval", type=int, default=0,
                         help="Polling interval in seconds (0 = one-shot)")
@@ -436,17 +451,22 @@ def main():
         else:
             print(output)
 
+    if args.evolved:
+        from evo_oracle import EvoOracle, evolved_robust_aggregate
+        evo = EvoOracle(os.environ.get("ORACLE_EVO_DIR", "evo-data"))
+        run = lambda: evolved_robust_aggregate(aggregator, evo)
+    else:
+        run = aggregator.aggregate
+
     if args.interval > 0:
         try:
             while True:
-                data = aggregator.aggregate()
-                print_output(data)
+                print_output(run())
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nShutting down.", file=sys.stderr)
     else:
-        data = aggregator.aggregate()
-        print_output(data)
+        print_output(run())
 
 
 if __name__ == "__main__":

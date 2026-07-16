@@ -33,6 +33,7 @@ sdk/pwa/icons/icon-*.png
 *.log
 *.jsonl
 feeds.jsonl
+evo-data/
 .DS_Store
 
 # Secrets

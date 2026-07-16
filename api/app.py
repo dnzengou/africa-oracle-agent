@@ -4,11 +4,14 @@ Endpoints:
   GET  /                — dashboard UI (single-page, self-contained)
   GET  /health          — liveness + version + provider count
   GET  /providers       — provider/country/currency map
+  GET  /rates           — compact rate map; ?from=&to=&amount= adds a conversion
   POST /hunt            — single feed: {provider, country, simulate}
   POST /feeds/all       — aggregated feed (median + vol-weighted spread)
   POST /feeds/quorum    — resilient feed: only currencies with ≥ min_providers
   POST /feeds/robust    — quorum + Tukey-fence outlier filter
+  POST /feeds/evolved   — robust + fitness-weighted consensus (EvoOracle flywheel)
   POST /convert         — cross-currency conversion (from, to, amount, side)
+  GET  /evo/genome      — provider-fitness genome + trajectory count
   GET  /feeds/stream    — Server-Sent Events: aggregate every interval seconds
   GET  /metrics         — Prometheus text format: oracle counters
 """
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from collections import defaultdict, deque
@@ -30,12 +34,16 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from evo_oracle import EvoOracle, evolved_robust_aggregate  # noqa: E402
 from oracle_agent import PROVIDERS, OracleAgent, OracleAggregator, convert_amount  # noqa: E402
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 CACHE_TTL_S = 10
 RATE_LIMIT_PER_MIN = 60
+RATE_BUCKETS_MAX = 4096
 DASHBOARD_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+
+_evo = EvoOracle(os.environ.get("ORACLE_EVO_DIR", "evo-data"))
 
 app = FastAPI(
     title="Africa Oracle Extraction Agent",
@@ -88,6 +96,8 @@ _metrics: dict[str, int] = {
     "feeds_quorum_failed_total": 0,
     "feeds_outliers_dropped_total": 0,
     "convert_requests_total": 0,
+    "rates_requests_total": 0,
+    "feeds_evolved_requests_total": 0,
     "cache_hits_total": 0,
     "cache_misses_total": 0,
     "rate_limited_total": 0,
@@ -114,11 +124,24 @@ async def _cached(key: str, fn) -> dict:
 _rate_buckets: dict[str, deque] = defaultdict(deque)
 
 
+def _client_ip(request: Request) -> str:
+    # Behind Fly/Vercel the socket peer is the edge proxy — without this every
+    # user would share one bucket. Headers are proxy-set, not client-set, on
+    # those platforms.
+    fly = request.headers.get("fly-client-ip")
+    if fly:
+        return fly
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
     if request.url.path in ("/health", "/metrics", "/") or request.url.path.startswith("/static"):
         return await call_next(request)
-    ip = request.client.host if request.client else "?"
+    ip = _client_ip(request)
     bucket = _rate_buckets[ip]
     now = time.time()
     while bucket and now - bucket[0] > 60:
@@ -131,6 +154,9 @@ async def rate_limit(request: Request, call_next):
             headers={"Retry-After": "60"},
         )
     bucket.append(now)
+    if len(_rate_buckets) > RATE_BUCKETS_MAX:
+        for stale_ip in [k for k, b in _rate_buckets.items() if not b or now - b[-1] > 60]:
+            del _rate_buckets[stale_ip]
     return await call_next(request)
 
 
@@ -147,13 +173,17 @@ def _build_aggregator() -> OracleAggregator:
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse)
-def dashboard() -> HTMLResponse:
-    if DASHBOARD_PATH.exists():
-        return HTMLResponse(DASHBOARD_PATH.read_text(encoding="utf-8"))
-    return HTMLResponse(
+try:
+    _dashboard_html = DASHBOARD_PATH.read_text(encoding="utf-8")
+except OSError:
+    _dashboard_html = (
         f"<h1>Africa Oracle {VERSION}</h1><p>API is running. See <a href='/docs'>/docs</a>.</p>"
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    return HTMLResponse(_dashboard_html)
 
 
 @app.get("/health")
@@ -214,15 +244,71 @@ async def feeds_quorum(req: QuorumRequest) -> dict:
 async def feeds_robust(req: RobustRequest) -> dict:
     """Resilient — quorum + Tukey-fence outlier filter on mid_price."""
     _metrics["feeds_robust_requests_total"] += 1
+    # Quantize tukey_k so the cache key space stays bounded (a continuous
+    # float would let clients mint unlimited cache entries).
+    k = round(req.tukey_k, 1)
     result = await _cached(
-        f"robust:{req.min_providers}:{req.tukey_k}",
-        lambda: _build_aggregator().robust_quorum_aggregate(
-            req.min_providers, req.tukey_k
-        ),
+        f"robust:{req.min_providers}:{k}",
+        lambda: _build_aggregator().robust_quorum_aggregate(req.min_providers, k),
     )
     _metrics["feeds_quorum_failed_total"] += len(result.get("quorum_failed", []))
     _metrics["feeds_outliers_dropped_total"] += len(result.get("outliers_dropped", []))
     return result
+
+
+@app.post("/feeds/evolved")
+async def feeds_evolved(req: RobustRequest) -> dict:
+    """EvoOracle flywheel — robust filter, trajectory capture, then
+    fitness-weighted consensus. Every call sharpens the genome."""
+    _metrics["feeds_evolved_requests_total"] += 1
+    k = round(req.tukey_k, 1)
+    return await _cached(
+        f"evolved:{req.min_providers}:{k}",
+        lambda: evolved_robust_aggregate(_build_aggregator(), _evo, req.min_providers, k),
+    )
+
+
+@app.get("/evo/genome")
+def evo_genome() -> dict:
+    """The moat, inspectable: per-source fitness + accumulated trajectories."""
+    return _evo.stats()
+
+
+@app.get("/rates")
+async def rates(
+    from_ccy: str | None = Query(default=None, alias="from", min_length=3, max_length=3),
+    to_ccy: str | None = Query(default=None, alias="to", min_length=3, max_length=3),
+    amount: float | None = Query(default=None, gt=0),
+) -> dict:
+    """One-GET integration surface: compact rate map, optionally a conversion.
+
+        curl https://<host>/rates
+        curl "https://<host>/rates?from=KES&to=NGN&amount=1000"
+    """
+    _metrics["rates_requests_total"] += 1
+    feed = await _cached(
+        "robust:1:1.5",
+        lambda: _build_aggregator().robust_quorum_aggregate(1, 1.5),
+    )
+    out = {
+        "base": "USD",
+        "timestamp": feed.get("timestamp"),
+        "rates": {
+            p["currency"]: {
+                "mid": p["mid_price"], "buy": p["buy_price"],
+                "sell": p["sell_price"], "confidence": p["avg_confidence"],
+            }
+            for p in feed.get("prices", [])
+        },
+    }
+    if from_ccy and to_ccy and amount:
+        try:
+            out["conversion"] = convert_amount(
+                feed, from_ccy.upper(), to_ccy.upper(), amount, "mid"
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return out
 
 
 @app.post("/convert")

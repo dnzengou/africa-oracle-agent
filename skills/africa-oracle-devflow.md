@@ -4,17 +4,18 @@ description: Project-specific DevFlow skill for africa-oracle-agent. Pre-loads p
 metadata:
   type: skill
   parent: devflow@1.1
-  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0, africa-oracle-devflow@0.3.0, africa-oracle-devflow@0.3.1, africa-oracle-devflow@0.4.0]
-  evolved_from: 2026-06-25 v0.5.0 Tukey-fence outlier-defense session
-  fitness: 0.98  # +0.02 vs v0.4.0 — Resilient pillar widens (manipulation defense on top of partition defense)
+  lineage: [devflow, kafca, evo-metaclaw, africa-oracle-devflow@0.1.0, africa-oracle-devflow@0.2.0, africa-oracle-devflow@0.3.0, africa-oracle-devflow@0.3.1, africa-oracle-devflow@0.4.0, africa-oracle-devflow@0.5.0, africa-oracle-devflow@0.6.0]
+  evolved_from: 2026-07-11 v0.7.0 EvoOracle-flywheel session (B+P+D RRSS ARM · KafCa E+Im+Bl · KafCade evolve evo-metaclaw)
+  fitness: 0.99  # +0.01 vs v0.6.0 — moat pillar (Evolving) enters lineage: trajectory-data flywheel operational, competitor-copyable registry is decoupled from competitor-uncopyable operating history
   niche: phase-0-stablecoin-oracle
-  version: 0.5.0
+  version: 0.7.0
   pillars:
     - resilient
     - sovereign
     - scalable
     - affordable
     - alternative-to-foreign-fiat-stablecoins
+    - evolving  # v0.7.0: fitness genome + trajectory log = moat
 ---
 
 # Africa Oracle DevFlow — Project-Specific Skill
@@ -199,7 +200,9 @@ devflow@1.1
                       └── africa-oracle-devflow@0.3.0  (consolidation + README rule)
                            └── africa-oracle-devflow@0.3.1  (FunC compile gate)
                                 └── africa-oracle-devflow@0.4.0  (5-channel SDK distribution)
-                                     └── africa-oracle-devflow@0.5.0  ← this file (Tukey-fence outlier defense)
+                                     └── africa-oracle-devflow@0.5.0  (Tukey-fence outlier defense)
+                                          └── africa-oracle-devflow@0.6.0  (production dashboard + /convert + hardening)
+                                               └── africa-oracle-devflow@0.7.0  ← this file (EvoOracle flywheel — 6th pillar + moat)
 ```
 
 Bump version when: new deploy target added, provider list changes, R²S² gate criteria added, test recipe changes, OR pillar definition changes.
@@ -213,7 +216,37 @@ Bump version when: new deploy target added, provider list changes, R²S² gate c
 | 0.3.0 | 2026-06-08 | Bl rule extended to enforce README.md consistency with Blueprint + SOVEREIGNTY + DEPLOY (README was stale through v0.2.0/v0.3.0 ships); polyglot-drift policy formalized (quorum is Python-only by design); FunC scope-out hardened (third repeated flag → dedicated session) | 0.90 (public-facing docs now consistent) |
 | 0.3.1 | 2026-06-15 | FunC contract scope-out resolved: `afri-token.fc` rewritten against TIP-74 stdlib (P1-5/6/7 discharged); compile gate added to D path; `tests/test_afri_token_funcs.fc` + `tests/run_func_tests.sh` added; collateral-ratio unit bug (12 % vs 120 %) corrected; Solid R²S² gate ⚠ → ✅ | 0.92 (Alternative pillar now ⚠ → ✅; FunC compiles to BoC) |
 | 0.4.0 | 2026-06-22 | 5-channel SDK distribution shipped (`sdk/{python,typescript,extension,pwa,vscode,installer}`); test baseline 20 → 30 with `tests/test_sdk.py` (MV3 CSP, no-XSS, manifest JSON); Bl rule extended with distribution-surface gate; D path now lists SDK publish targets (PyPI/npm/web stores); `api/app.py` `VERSION` bumped 0.3.0 → 0.4.0 | 0.96 (Scalable 9→10 via edge runtimes; Affordable 9→10 via PWA replacing APK; 5-pillar avg 9.2 → 9.6) |
-| **0.5.0** | **2026-06-25** | **Tukey-fence outlier defense on `mid_price` (`OracleAggregator._tukey_bounds` + `robust_quorum_aggregate`); `POST /feeds/robust` endpoint with Pydantic-clamped `tukey_k ∈ [0.5, 3.0]`; 2 new Prometheus counters; test baseline 30 → 37 incl. planted-outlier integration test proving a 1000× wild feed is filtered; `api/app.py` `VERSION` bumped 0.4.0 → 0.5.0; Resilient pillar definition extended from partition-defense to partition + manipulation defense.** | **0.98 (Resilient 9→10; 5-pillar avg 9.6 → 9.8)** |
+| 0.5.0 | 2026-06-25 | Tukey-fence outlier defense on `mid_price` (`OracleAggregator._tukey_bounds` + `robust_quorum_aggregate`); `POST /feeds/robust` endpoint with Pydantic-clamped `tukey_k ∈ [0.5, 3.0]`; 2 new Prometheus counters; test baseline 30 → 37 incl. planted-outlier integration test proving a 1000× wild feed is filtered; `api/app.py` `VERSION` bumped 0.4.0 → 0.5.0; Resilient pillar definition extended from partition-defense to partition + manipulation defense. | 0.98 (Resilient 9→10; 5-pillar avg 9.6 → 9.8) |
+| 0.6.0 | 2026-06-25 | Production dashboard SPA at `/` (self-contained converter + live rates + dark mode) · `POST /convert` remittance endpoint · CORS · 10 s TTL cache · per-IP 60 req/min rate limit · aggregator refactored (`_collect_prices` / `_group_by_currency` / `_consensus_for_currency`); test baseline 37 → 43. Retroactive lineage entry (audit-writes-lineage rule): the branch shipped as `claude/production-readiness-optimization-1pdati` and merged into main during the v0.7.0 session. | 0.98 (Adoption pillar seeded; Alternative 10 via consumer surface) |
+| **0.7.0** | **2026-07-11** | **EvoOracle flywheel — the moat.** `evo_oracle.py` (stdlib-only): every aggregation run captured as trajectory signal (`trajectories.jsonl`, append-only, atomic writes) that evolves an integer-basis-point fitness genome per provider×country source (`genome.json`); consensus becomes a fitness-weighted median; sources whose fitness collapses below 2000 bps are quarantined with 3500 bps recovery hysteresis; all-quarantined currencies fall back to unweighted robust consensus so the oracle never goes dark. Surfaces: `POST /feeds/evolved`, `GET /evo/genome`, `GET /rates` (one-GET adoption surface), CLI `--evolved`, dashboard footer counter. Hardening: rate limiter proxy-aware (Fly-Client-IP → X-Forwarded-For → socket), cache key bounded (tukey_k quantized), stale bucket sweep at 4096, dashboard read-once at startup, `--simulate`→BooleanOptionalAction, `ORACLE_REFERENCE_RATES_JSON` env override. Consolidation: `httpx` moved to `requirements-dev.txt` (was shipping in prod image), deleted stale `EVAL_REPORT.md` + superseded `AFRI_Blueprint_v01.md`. Test baseline 43 → 62 with `tests/test_evo.py` (weighted-median, evolution + clamps, hysteresis, persistence, memory-only fallback, all-quarantined fallback, 4 new API tests). 6th pillar (Evolving) added to value prop + blueprint. | **0.99 (Evolving pillar enters; moat operational — competitor can copy registry, cannot copy trajectory log)** |
 
 ---
-*Evolved 2026-06-25 from a B+P+D+Bl+evolve Tukey-fence session. Source genome: `africa-oracle-devflow@0.4.0`. Fitness: 0.98.*
+*Evolved 2026-07-11 from a `B+P+D RRSS ARM · KafCa E+Im+Bl · KafCade evolve evo-metaclaw` session. Source genome: `africa-oracle-devflow@0.6.0`. Fitness: 0.99.*
+
+## v0.7.0 mutation signals for evo-metaclaw
+
+Captured for the parent skill's next lineage entry:
+
+- **Moat-pillar rule**: when a "value proposition" table lists 4-5 orthogonal
+  pillars but none of them is "the thing a competitor can't copy in a
+  weekend", the pillar list is incomplete. Prompt the user for the moat
+  explicitly, or infer one from the code (accumulated state, learned weights,
+  operator relationships, regulatory position). AFRI had 5 pillars — all
+  copyable. Adding **Evolving** (trajectory-data flywheel) closed the moat gap.
+
+- **Retroactive lineage entries are legal**: v0.6.0 shipped weeks before its
+  blueprint/skill lineage entry. Rather than skipping it or backdating a
+  fake session, record it as a retroactive audit-writes-lineage entry so the
+  ancestry stays complete. Loss-of-lineage is worse than a marker entry.
+
+- **Fitness-genome shape**: for financial / oracle domains, keep fitness in
+  integer basis points (0..10000), never floats — matches the "no float in
+  money paths" rule and gives quarantine thresholds a natural units system.
+  Hysteresis on activation (2000 quarantine, 3500 recover) prevents flapping
+  when a source hovers near the boundary.
+
+- **Memory-only fallback for genome persistence**: on read-only filesystems
+  (Vercel, other serverless), the flywheel must degrade to in-memory
+  evolution rather than failing the feed. Same principle as
+  SCHEDULER_CHECK's "bypass to inline" — the platform decides whether
+  persistence is possible, the flywheel decides that persistence is optional.
