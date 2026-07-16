@@ -10,8 +10,12 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY oracle_agent.py ./
+COPY oracle_agent.py evo_oracle.py ./
 COPY api ./api
+
+RUN adduser --system --uid 1001 --group --no-create-home oracle \
+ && chown -R oracle:oracle /app
+USER oracle
 
 EXPOSE 8000
 

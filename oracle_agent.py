@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Africa Oracle Extraction Agent v0.1.0
+Africa Oracle Extraction Agent v0.7.0
 
 Extracts real-time price feeds from mobile money aggregator APIs.
 Each agent polls one provider in one country and reports buy/sell prices.
@@ -75,6 +75,17 @@ REFERENCE_RATES = {
     "MZN": 64.00,  "SOS": 570.00,  "XOF": 610.00,  "XAF": 610.00,
     "MGA": 4600.00,"NGN": 1550.00, "ZMW": 25.00,
 }
+
+# Operators can refresh bootstrap rates without a redeploy:
+#   ORACLE_REFERENCE_RATES_JSON='{"NGN": 1600.0}' merges over the defaults.
+_rates_override = os.environ.get("ORACLE_REFERENCE_RATES_JSON")
+if _rates_override:
+    try:
+        REFERENCE_RATES.update({
+            k: float(v) for k, v in json.loads(_rates_override).items()
+        })
+    except (ValueError, TypeError, AttributeError) as e:
+        print(f"Ignoring invalid ORACLE_REFERENCE_RATES_JSON: {e}", file=sys.stderr)
 
 # ─── Oracle Agent ─────────────────────────────────────────────────────────────
 
@@ -170,62 +181,63 @@ class OracleAggregator:
     def add_agent(self, agent: OracleAgent):
         self.agents.append(agent)
 
-    def aggregate(self) -> dict:
-        """Collect prices from all agents and compute consensus."""
+    def _collect_prices(self) -> list[dict]:
         prices = []
         for agent in self.agents:
             try:
-                price = agent.fetch_price()
-                prices.append(price)
+                prices.append(agent.fetch_price())
             except Exception as e:
                 print(f"Agent {agent.agent_id} failed: {e}", file=sys.stderr)
+        return prices
 
+    @staticmethod
+    def _group_by_currency(feeds: list[dict]) -> dict[str, list[dict]]:
+        by_ccy: dict[str, list[dict]] = {}
+        for f in feeds:
+            by_ccy.setdefault(f["currency"], []).append(f)
+        return by_ccy
+
+    @staticmethod
+    def _consensus_for_currency(ccy: str, feeds: list[dict]) -> dict:
+        buy_prices = [f["buy_price"] for f in feeds]
+        sell_prices = [f["sell_price"] for f in feeds]
+        volumes = [f["volume_24h"] for f in feeds]
+        confidences = [f["confidence"] for f in feeds]
+        sources = [f["sources"] for f in feeds]
+
+        median_buy = statistics.median(buy_prices)
+        median_sell = statistics.median(sell_prices)
+        total_vol = sum(volumes)
+        weighted_spread = sum(
+            f["spread"] * (f["volume_24h"] / total_vol) for f in feeds
+        ) if total_vol > 0 else 0
+
+        return {
+            "currency": ccy,
+            "countries": list(set(f["country"] for f in feeds)),
+            "providers": list(set(f["provider"] for f in feeds)),
+            "buy_price": round(median_buy, 4),
+            "sell_price": round(median_sell, 4),
+            "mid_price": round((median_buy + median_sell) / 2, 4),
+            "spread": round(weighted_spread, 6),
+            "spread_bps": round(weighted_spread * 10000, 2),
+            "total_volume_24h": round(total_vol, 2),
+            "avg_confidence": round(sum(confidences) / len(confidences), 4),
+            "total_sources": sum(sources),
+            "agent_count": len(feeds),
+        }
+
+    def aggregate(self) -> dict:
+        """Collect prices from all agents and compute consensus."""
+        prices = self._collect_prices()
         if not prices:
             return {"error": "no prices collected", "timestamp": int(time.time())}
 
         self.last_prices = prices
-
-        # Group by currency
-        by_currency = {}
-        for p in prices:
-            ccy = p["currency"]
-            if ccy not in by_currency:
-                by_currency[ccy] = []
-            by_currency[ccy].append(p)
-
-        # Compute consensus per currency
-        consensus = []
-        for ccy, feeds in by_currency.items():
-            buy_prices = [f["buy_price"] for f in feeds]
-            sell_prices = [f["sell_price"] for f in feeds]
-            volumes = [f["volume_24h"] for f in feeds]
-            confidences = [f["confidence"] for f in feeds]
-            sources = [f["sources"] for f in feeds]
-
-            # True median (averages the two middle values for even-length lists)
-            median_buy = statistics.median(buy_prices)
-            median_sell = statistics.median(sell_prices)
-
-            # Volume-weighted spread
-            total_vol = sum(volumes)
-            weighted_spread = sum(
-                f["spread"] * (f["volume_24h"] / total_vol) for f in feeds
-            ) if total_vol > 0 else 0
-
-            consensus.append({
-                "currency": ccy,
-                "countries": list(set(f["country"] for f in feeds)),
-                "providers": list(set(f["provider"] for f in feeds)),
-                "buy_price": round(median_buy, 4),
-                "sell_price": round(median_sell, 4),
-                "mid_price": round((median_buy + median_sell) / 2, 4),
-                "spread": round(weighted_spread, 6),
-                "spread_bps": round(weighted_spread * 10000, 2),
-                "total_volume_24h": round(total_vol, 2),
-                "avg_confidence": round(sum(confidences) / len(confidences), 4),
-                "total_sources": sum(sources),
-                "agent_count": len(feeds),
-            })
+        consensus = [
+            self._consensus_for_currency(ccy, feeds)
+            for ccy, feeds in self._group_by_currency(prices).items()
+        ]
 
         return {
             "oracle_id": hashlib.sha256(
@@ -236,14 +248,13 @@ class OracleAggregator:
             "currencies": len(consensus),
             "agents_reporting": len(prices),
             "prices": consensus,
-            "raw_feeds": prices,  # In production: omit for efficiency
+            "raw_feeds": prices,
         }
 
     def quorum_aggregate(self, min_providers: int = 2) -> dict:
-        """Resilient variant of aggregate() — only publishes prices for currencies
-        where at least `min_providers` distinct providers reported. Currencies that
-        fail quorum are dropped from `prices` but listed in `quorum_failed` so the
-        consumer can detect a partition (e.g. M-Pesa outage in KE)."""
+        """Resilient — only publishes prices where ≥ `min_providers` distinct
+        providers reported. Failed currencies listed in `quorum_failed` so
+        consumers can detect a partition (e.g. M-Pesa outage in KE)."""
         base = self.aggregate()
         if "prices" not in base:
             return base
@@ -293,86 +304,33 @@ class OracleAggregator:
 
     def robust_quorum_aggregate(self, min_providers: int = 2,
                                   tukey_k: float = 1.5) -> dict:
-        """Quorum + outlier-resistant variant — applies a Tukey-fence filter on
-        mid_price per currency BEFORE consensus, then enforces quorum on the
-        surviving providers. Defends against a single compromised provider
-        publishing a wild price to sway the median.
-
-        Returns the same shape as quorum_aggregate() plus an `outliers_dropped`
-        array listing every (currency, provider, country, mid_price) tuple that
-        fell outside the IQR fence.
-        """
-        prices = []
-        for agent in self.agents:
-            try:
-                prices.append(agent.fetch_price())
-            except Exception as e:
-                print(f"Agent {agent.agent_id} failed: {e}", file=sys.stderr)
-
+        """Quorum + outlier-resistant — Tukey-fence filter on mid_price per
+        currency BEFORE consensus, then quorum on surviving distinct providers.
+        Defends against a single compromised provider swaying the median."""
+        prices = self._collect_prices()
         if not prices:
             return {"error": "no prices collected", "timestamp": int(time.time())}
 
-        by_currency: dict[str, list[dict]] = {}
-        for p in prices:
-            by_currency.setdefault(p["currency"], []).append(p)
-
         kept_feeds: list[dict] = []
         outliers: list[dict] = []
-        for ccy, feeds in by_currency.items():
-            mids = [f["mid_price"] for f in feeds]
-            lo, hi = self._tukey_bounds(mids, k=tukey_k)
+        for ccy, feeds in self._group_by_currency(prices).items():
+            lo, hi = self._tukey_bounds([f["mid_price"] for f in feeds], k=tukey_k)
             for f in feeds:
                 if lo <= f["mid_price"] <= hi:
                     kept_feeds.append(f)
                 else:
                     outliers.append({
-                        "currency": ccy,
-                        "provider": f["provider"],
-                        "country": f["country"],
-                        "mid_price": f["mid_price"],
-                        "bound_lo": round(lo, 4),
-                        "bound_hi": round(hi, 4),
+                        "currency": ccy, "provider": f["provider"],
+                        "country": f["country"], "mid_price": f["mid_price"],
+                        "bound_lo": round(lo, 4), "bound_hi": round(hi, 4),
                     })
 
-        # Re-aggregate from the filtered set using the standard pipeline
-        scratch = OracleAggregator()
-        scratch.last_prices = kept_feeds
-        # Reuse aggregate()'s per-currency consensus logic by injecting kept feeds
-        # via a tiny shim: build the by_currency map and rerun the consensus path.
-        passed_consensus: list[dict] = []
-        kept_by_ccy: dict[str, list[dict]] = {}
-        for f in kept_feeds:
-            kept_by_ccy.setdefault(f["currency"], []).append(f)
-        for ccy, feeds in kept_by_ccy.items():
-            buy_prices = [f["buy_price"] for f in feeds]
-            sell_prices = [f["sell_price"] for f in feeds]
-            volumes = [f["volume_24h"] for f in feeds]
-            confidences = [f["confidence"] for f in feeds]
-            sources = [f["sources"] for f in feeds]
-            median_buy = statistics.median(buy_prices)
-            median_sell = statistics.median(sell_prices)
-            total_vol = sum(volumes)
-            weighted_spread = (
-                sum(f["spread"] * (f["volume_24h"] / total_vol) for f in feeds)
-                if total_vol > 0 else 0
-            )
-            passed_consensus.append({
-                "currency": ccy,
-                "countries": list(set(f["country"] for f in feeds)),
-                "providers": list(set(f["provider"] for f in feeds)),
-                "buy_price": round(median_buy, 4),
-                "sell_price": round(median_sell, 4),
-                "mid_price": round((median_buy + median_sell) / 2, 4),
-                "spread": round(weighted_spread, 6),
-                "spread_bps": round(weighted_spread * 10000, 2),
-                "total_volume_24h": round(total_vol, 2),
-                "avg_confidence": round(sum(confidences) / len(confidences), 4),
-                "total_sources": sum(sources),
-                "agent_count": len(feeds),
-            })
-
+        consensus = [
+            self._consensus_for_currency(ccy, feeds)
+            for ccy, feeds in self._group_by_currency(kept_feeds).items()
+        ]
         passed, failed = [], []
-        for p in passed_consensus:
+        for p in consensus:
             distinct = len(set(p["providers"]))
             (passed if distinct >= min_providers else failed).append(
                 {**p, "distinct_providers": distinct}
@@ -398,6 +356,49 @@ class OracleAggregator:
         }
 
 
+def convert_amount(feed: dict, from_ccy: str, to_ccy: str,
+                   amount: float, side: str = "mid") -> dict:
+    """Cross-currency conversion using an aggregated feed (both currencies
+    priced against USD reference). Returns amount + rate + confidence.
+
+    side ∈ {"mid", "buy", "sell"}:
+      - "mid":  neutral (mid-price both legs)
+      - "buy":  consumer buying `to_ccy` — sell `from_ccy` at buy price, buy `to_ccy` at sell price
+      - "sell": consumer selling `to_ccy` back — opposite legs
+    """
+    prices = {p["currency"]: p for p in feed.get("prices", [])}
+    if from_ccy not in prices or to_ccy not in prices:
+        missing = [c for c in (from_ccy, to_ccy) if c not in prices]
+        raise ValueError(f"unsupported currency: {', '.join(missing)}")
+
+    src, dst = prices[from_ccy], prices[to_ccy]
+    if side == "buy":
+        src_rate = src["buy_price"]   # sell from_ccy → get less USD
+        dst_rate = dst["sell_price"]  # buy to_ccy   → cost more of it
+    elif side == "sell":
+        src_rate = src["sell_price"]
+        dst_rate = dst["buy_price"]
+    else:
+        src_rate = src["mid_price"]
+        dst_rate = dst["mid_price"]
+
+    # from_ccy → USD → to_ccy (both quoted as ccy/USD, so divide then multiply)
+    usd_amount = amount / src_rate
+    to_amount = usd_amount * dst_rate
+    rate = dst_rate / src_rate
+
+    return {
+        "from": {"currency": from_ccy, "amount": round(amount, 4)},
+        "to":   {"currency": to_ccy,   "amount": round(to_amount, 4)},
+        "rate": round(rate, 6),
+        "side": side,
+        "spread_bps": round((src["spread"] + dst["spread"]) * 10000, 2),
+        "confidence": round(min(src["avg_confidence"], dst["avg_confidence"]), 4),
+        "providers_from": src["providers"],
+        "providers_to": dst["providers"],
+    }
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -409,8 +410,12 @@ def main():
     parser.add_argument("--country", help="Country code (e.g., KE, NG, GH)")
     parser.add_argument("--all", action="store_true",
                         help="Run all provider/country combinations")
-    parser.add_argument("--simulate", action="store_true", default=True,
-                        help="Simulate price data (default: True)")
+    parser.add_argument("--simulate", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Simulate price data (--no-simulate needs API keys)")
+    parser.add_argument("--evolved", action="store_true",
+                        help="Fitness-weighted consensus + trajectory capture "
+                             "(persists to $ORACLE_EVO_DIR, default ./evo-data)")
     parser.add_argument("--output", help="Output file (default: stdout)")
     parser.add_argument("--interval", type=int, default=0,
                         help="Polling interval in seconds (0 = one-shot)")
@@ -446,17 +451,22 @@ def main():
         else:
             print(output)
 
+    if args.evolved:
+        from evo_oracle import EvoOracle, evolved_robust_aggregate
+        evo = EvoOracle(os.environ.get("ORACLE_EVO_DIR", "evo-data"))
+        run = lambda: evolved_robust_aggregate(aggregator, evo)
+    else:
+        run = aggregator.aggregate
+
     if args.interval > 0:
         try:
             while True:
-                data = aggregator.aggregate()
-                print_output(data)
+                print_output(run())
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nShutting down.", file=sys.stderr)
     else:
-        data = aggregator.aggregate()
-        print_output(data)
+        print_output(run())
 
 
 if __name__ == "__main__":
