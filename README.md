@@ -3,7 +3,7 @@
 > **A resilient, sovereign, scalable, affordable alternative to foreign fiat-backed stablecoins.**
 > Phase 0 of the AFRI Jetton (TIP-74 on TON) — mobile-money-native price oracle for ~30 African countries.
 
-[![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.6.0-black)]()
+[![tests](https://img.shields.io/badge/tests-50%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.7.0-black)]() [![ai-ready](https://img.shields.io/badge/AI--ready-llms.txt%20%C2%B7%20ai--plugin.json%20%C2%B7%20JSON--LD-blueviolet)]()
 
 ## What it does
 
@@ -84,22 +84,25 @@ curl -fsSL https://raw.githubusercontent.com/nzengou/africa-oracle-agent/main/sd
 
 Build all artifacts at once: `bash sdk/build.sh` → `dist/`.
 
-## API endpoints (v0.6.0)
+## API endpoints (v0.7.0)
 
 | Method | Path | Pillar |
 |---|---|---|
-| `GET` | `/` | dashboard UI (self-contained, mobile-first, dark-mode aware) |
+| `GET` | `/` | dashboard UI + live widget preview |
 | `GET` | `/health` | – |
 | `GET` | `/providers` | – |
 | `POST` | `/hunt` `{provider, country, simulate}` | – |
 | `POST` | `/feeds/all` | Scalable (async, cached 10s) |
 | `POST` | `/feeds/quorum` `{min_providers}` | **Resilient** |
 | `POST` | `/feeds/robust` `{min_providers, tukey_k}` | **Resilient** (+ outlier filter) |
-| `POST` | `/convert` `{from, to, amount, side}` | **Alternative** (commercial use case) |
+| `POST` | `/convert` `{from, to, amount, side}` | **Alternative** (commercial) |
+| `GET` | `/rate/{from}/{to}` | **Alternative** (cite-friendly) |
+| `GET` | `/widget.js` | **Alternative** (one-line embed) |
 | `GET` | `/feeds/stream?interval=N` | **Scalable** (SSE) |
 | `GET` | `/metrics` | observability |
+| `GET` | `/llms.txt` · `/ai.txt` · `/.well-known/ai-plugin.json` · `/.well-known/security.txt` | AI-discoverability |
 
-Production hardening in v0.6.0: 10 s TTL cache, CORS, per-IP rate limit (60 req/min), non-root Docker user.
+Production hardening v0.7.0: AI-crawler whitelist (unlimited `/llms.txt`, `/ai.txt`, `/widget.js`, `/.well-known/*`). Schema.org JSON-LD + OpenGraph meta tags in dashboard.
 
 ## Deploy targets
 
@@ -116,15 +119,23 @@ Detailed instructions: [`DEPLOY.md`](DEPLOY.md).
 - [`oracle_agent.go`](oracle_agent.go) — Go port (edge performance)
 - [`oracle_agent.sh`](oracle_agent.sh) — POSIX shell port (PicoClaw / Raspberry Pi edge)
 - [`api/app.py`](api/app.py) — FastAPI ASGI server
+- [`api/static/index.html`](api/static/index.html) — dashboard UI
 - [`afri-bridge.sh`](afri-bridge.sh) — Mobile money ↔ AFRI mint/burn orchestration
 - [`afri-token.fc`](afri-token.fc) — TON Jetton (TIP-74) smart contract scaffold
 - [`AFRI_Blueprint.md`](AFRI_Blueprint.md) — full project blueprint + roadmap + changelog
 - [`SOVEREIGNTY.md`](SOVEREIGNTY.md) — value proposition + USDT/USDC comparison
 - [`EVAL_REPORT.md`](EVAL_REPORT.md) — audit + R²S² gate scores
+- [`INTEGRATE.md`](INTEGRATE.md) — end-user integration recipes (cURL · Next.js · Python · widget)
+- [`EVOFORGE.md`](EVOFORGE.md) — self-evolving oracle-skill rationale (the moat)
+- [`FACTS.md`](FACTS.md) — every public claim → source code mapping (verifiable only)
+- [`CHANGELOG.md`](CHANGELOG.md) — version history
+- [`SECURITY.md`](SECURITY.md) — responsible disclosure
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution workflow
+- [`CITATION.cff`](CITATION.cff) — citation metadata
 
 ## Roadmap
 
-- [x] **Phase 0** — Oracle Bootstrapping (v0.6.0): provider mapping · simulated feed · quorum + Tukey outlier filter · async API · SSE streaming · multi-arch image · self-host path · 5-channel SDK distribution · self-contained dashboard UI · `/convert` cross-currency endpoint · TTL cache · CORS · rate limit · non-root container
+- [x] **Phase 0** — Oracle Bootstrapping (v0.7.0): provider mapping · simulated feed · quorum + Tukey outlier filter · async API · SSE streaming · multi-arch image · self-host path · 5-channel SDK distribution · dashboard UI · `/convert` + `/rate/{from}/{to}` · `/widget.js` one-line embed · AI-discoverability (`llms.txt`, `ai-plugin.json`, JSON-LD) · credibility files · integration guide
 - [ ] **Phase 1** — AFRI Jetton on TON testnet: FunC contract rewrite against TIP-74 stdlib · oracle-signed price feeds · bridge handshake
 - [ ] **Phase 2** — Production rollout: provider API keys + KYC at provider boundary · liquidity onboarding (STON.fi LP) · reserve audit publication · mainnet deploy
 

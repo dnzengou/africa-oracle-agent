@@ -1,16 +1,21 @@
 """FastAPI ASGI wrapper around oracle_agent.py.
 
 Endpoints:
-  GET  /                — dashboard UI (single-page, self-contained)
-  GET  /health          — liveness + version + provider count
-  GET  /providers       — provider/country/currency map
-  POST /hunt            — single feed: {provider, country, simulate}
-  POST /feeds/all       — aggregated feed (median + vol-weighted spread)
-  POST /feeds/quorum    — resilient feed: only currencies with ≥ min_providers
-  POST /feeds/robust    — quorum + Tukey-fence outlier filter
-  POST /convert         — cross-currency conversion (from, to, amount, side)
-  GET  /feeds/stream    — Server-Sent Events: aggregate every interval seconds
-  GET  /metrics         — Prometheus text format: oracle counters
+  GET  /                      — dashboard UI (single-page, self-contained)
+  GET  /health                — liveness + version + provider count
+  GET  /providers             — provider/country/currency map
+  POST /hunt                  — single feed: {provider, country, simulate}
+  POST /feeds/all             — aggregated feed (median + vol-weighted spread)
+  POST /feeds/quorum          — resilient feed: ≥ min_providers
+  POST /feeds/robust          — quorum + Tukey-fence outlier filter
+  POST /convert               — cross-currency conversion (from, to, amount, side)
+  GET  /rate/{from}/{to}      — simple GET rate (cacheable, cite-friendly)
+  GET  /widget.js             — embeddable live-rate widget (one-line integration)
+  GET  /feeds/stream          — Server-Sent Events
+  GET  /metrics               — Prometheus text format
+  GET  /llms.txt              — AI-crawler guide
+  GET  /ai.txt                — AI agent policy
+  GET  /.well-known/*         — ai-plugin.json, security.txt
 """
 
 from __future__ import annotations
@@ -25,17 +30,21 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from oracle_agent import PROVIDERS, OracleAgent, OracleAggregator, convert_amount  # noqa: E402
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 CACHE_TTL_S = 10
 RATE_LIMIT_PER_MIN = 60
-DASHBOARD_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DASHBOARD_PATH = STATIC_DIR / "index.html"
 
 app = FastAPI(
     title="Africa Oracle Extraction Agent",
@@ -88,6 +97,8 @@ _metrics: dict[str, int] = {
     "feeds_quorum_failed_total": 0,
     "feeds_outliers_dropped_total": 0,
     "convert_requests_total": 0,
+    "rate_requests_total": 0,
+    "widget_requests_total": 0,
     "cache_hits_total": 0,
     "cache_misses_total": 0,
     "rate_limited_total": 0,
@@ -116,7 +127,13 @@ _rate_buckets: dict[str, deque] = defaultdict(deque)
 
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
-    if request.url.path in ("/health", "/metrics", "/") or request.url.path.startswith("/static"):
+    path = request.url.path
+    if (path in ("/health", "/metrics", "/", "/llms.txt", "/ai.txt", "/widget.js")
+            or path.startswith("/static")
+            or path.startswith("/.well-known/")
+            or path.startswith("/openapi")
+            or path.startswith("/docs")
+            or path.startswith("/redoc")):
         return await call_next(request)
     ip = request.client.host if request.client else "?"
     bucket = _rate_buckets[ip]
@@ -272,6 +289,114 @@ async def _sse_loop(interval: int) -> AsyncGenerator[bytes, None]:
 async def feeds_stream(interval: int = Query(default=30, ge=5, le=300)) -> StreamingResponse:
     """SSE — affordable scale path (no per-poll HTTP overhead)."""
     return StreamingResponse(_sse_loop(interval), media_type="text/event-stream")
+
+
+# ─── Cite-friendly GET rate (for docs, chatbots, AI search agents) ───────────
+@app.get("/rate/{from_ccy}/{to_ccy}")
+async def rate(from_ccy: str, to_ccy: str) -> dict:
+    """Simple GET exchange rate. Cacheable, bookmarkable, cite-friendly."""
+    _metrics["rate_requests_total"] += 1
+    feed = await _cached(
+        "robust:1:1.5",
+        lambda: _build_aggregator().robust_quorum_aggregate(1, 1.5),
+    )
+    try:
+        out = convert_amount(feed, from_ccy.upper(), to_ccy.upper(), 1.0, "mid")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "from": from_ccy.upper(),
+        "to": to_ccy.upper(),
+        "rate": out["rate"],
+        "confidence": out["confidence"],
+        "spread_bps": out["spread_bps"],
+        "timestamp": feed.get("timestamp"),
+        "providers": sorted(set(out["providers_from"] + out["providers_to"])),
+    }
+
+
+# ─── Embeddable widget (commercial distribution lever) ───────────────────────
+_WIDGET_JS = """(function(){
+  var S=document.currentScript, D=S?S.dataset:{};
+  var FROM=(D.from||'KES').toUpperCase(), TO=(D.to||'NGN').toUpperCase();
+  var AMOUNT=parseFloat(D.amount||'100');
+  var API=D.api||(new URL(S.src)).origin;
+  var THEME=D.theme||'auto';
+  var id='afri-'+Math.random().toString(36).slice(2,9);
+  var el=document.createElement('div');el.id=id;
+  el.setAttribute('role','status');el.setAttribute('aria-live','polite');
+  var dark=(THEME==='dark')||(THEME==='auto'&&matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);
+  el.style.cssText='display:inline-flex;gap:8px;align-items:center;padding:8px 12px;'+
+    'border-radius:8px;font:500 13px/1.3 ui-monospace,Menlo,monospace;'+
+    'background:'+(dark?'#131b2e':'#fff')+';color:'+(dark?'#e6ebf5':'#0b1220')+';'+
+    'border:1px solid '+(dark?'#1f2a44':'#e5e9f0')+';';
+  el.innerHTML='<span style="opacity:.6">loading…</span>';
+  if(S&&S.parentNode) S.parentNode.insertBefore(el,S.nextSibling);
+  function fmt(n,d){return new Intl.NumberFormat(undefined,{maximumFractionDigits:d,minimumFractionDigits:d}).format(n);}
+  function load(){
+    fetch(API+'/convert',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from:FROM,to:TO,amount:AMOUNT,side:'mid'})})
+      .then(function(r){return r.json();})
+      .then(function(r){
+        if(r.detail){el.innerHTML='<span style=\"color:#dc2626\">'+r.detail+'</span>';return;}
+        var dot='<span style=\"width:6px;height:6px;border-radius:50%;background:#16a34a;display:inline-block\"></span>';
+        el.innerHTML=dot+' '+fmt(AMOUNT,2)+' '+FROM+' = <b>'+fmt(r.to.amount,2)+' '+TO+'</b>'+
+          ' <span style=\"opacity:.6\">· '+fmt(r.confidence*100,0)+'% conf</span>';
+      })
+      .catch(function(){el.innerHTML='<span style=\"color:#dc2626\">unavailable</span>';});
+  }
+  load(); setInterval(load,30000);
+})();
+"""
+
+
+@app.get("/widget.js")
+def widget_js() -> Response:
+    """Embeddable widget. Usage:
+        <script src="https://africa-oracle.fly.dev/widget.js"
+                data-from="KES" data-to="NGN" data-amount="100"></script>
+    """
+    _metrics["widget_requests_total"] += 1
+    return Response(
+        _WIDGET_JS,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+# ─── AI-discoverability (GEO: llms.txt, ai.txt, .well-known) ─────────────────
+def _serve_file(path: Path, media: str, cache_s: int = 3600) -> Response:
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return Response(
+        path.read_bytes(),
+        media_type=media,
+        headers={"Cache-Control": f"public, max-age={cache_s}"},
+    )
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt() -> Response:
+    """Guide for LLM crawlers (ChatGPT Search, Claude, Perplexity, etc.)."""
+    return _serve_file(REPO_ROOT / "llms.txt", "text/plain; charset=utf-8")
+
+
+@app.get("/ai.txt", response_class=PlainTextResponse)
+def ai_txt() -> Response:
+    """AI-agent policy (training data, attribution, rate limits)."""
+    return _serve_file(REPO_ROOT / "ai.txt", "text/plain; charset=utf-8")
+
+
+@app.get("/.well-known/ai-plugin.json")
+def ai_plugin() -> Response:
+    """OpenAI-style plugin manifest for ChatGPT / Claude / similar."""
+    return _serve_file(REPO_ROOT / ".well-known" / "ai-plugin.json", "application/json")
+
+
+@app.get("/.well-known/security.txt", response_class=PlainTextResponse)
+def security_txt() -> Response:
+    """RFC 9116 security contact."""
+    return _serve_file(REPO_ROOT / ".well-known" / "security.txt", "text/plain; charset=utf-8")
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

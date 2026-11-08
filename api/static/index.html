@@ -5,7 +5,38 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="theme-color" content="#0b1220" />
 <title>Africa Oracle · Live Mobile-Money FX</title>
-<meta name="description" content="Resilient mobile-money price oracle for African currencies. Live median FX rates from M-Pesa, MTN, Orange, Airtel." />
+<meta name="description" content="Resilient mobile-money price oracle for African currencies. Live median FX rates from M-Pesa, MTN, Orange, Airtel across ~30 countries, quorum-protected and outlier-filtered." />
+<link rel="canonical" href="https://africa-oracle.fly.dev/" />
+
+<!-- OpenGraph -->
+<meta property="og:title" content="Africa Oracle · Live Mobile-Money FX" />
+<meta property="og:description" content="Live median FX rates for African currencies from M-Pesa, MTN, Orange, Airtel. Quorum-protected, outlier-filtered." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://africa-oracle.fly.dev/" />
+<meta property="og:site_name" content="Africa Oracle" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<!-- AI-crawler friendly -->
+<meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large" />
+<meta name="ai-content-policy" content="attribution-required,no-fabrication" />
+
+<!-- Schema.org structured data for AI search tools -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Africa Oracle Extraction Agent",
+  "description": "Resilient mobile-money price oracle for African currencies. Aggregates feeds from M-Pesa, Airtel Money, Orange Money, MTN MoMo across ~30 countries into a quorum-protected, outlier-filtered median rate.",
+  "applicationCategory": "FinanceApplication",
+  "operatingSystem": "Linux, macOS, Windows, Docker, Fly.io",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "codeRepository": "https://github.com/nzengou/africa-oracle-agent",
+  "programmingLanguage": ["Python", "Go", "Shell", "TypeScript", "FunC"],
+  "softwareVersion": "0.6.0",
+  "license": "https://github.com/nzengou/africa-oracle-agent/blob/main/LICENSE"
+}
+</script>
+
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🌍%3C/text%3E%3C/svg%3E">
 <style>
   :root {
@@ -212,6 +243,18 @@
       <div class="rate"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div></div>
     </div>
   </section>
+
+  <section>
+    <h2>Embed anywhere <span style="font-family:var(--mono);font-size:11px;text-transform:none;color:var(--muted);">— one line of JS</span></h2>
+    <div class="card">
+      <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">Drop this into any HTML page to show a live rate. Attributes <code style="font-family:var(--mono)">data-from</code>, <code style="font-family:var(--mono)">data-to</code>, <code style="font-family:var(--mono)">data-amount</code>, <code style="font-family:var(--mono)">data-theme</code> are optional.</p>
+      <pre id="embed" style="margin:0;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:auto;font:12px var(--mono);"></pre>
+      <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="color:var(--muted);font-size:12px;">Live preview:</span>
+        <script id="embedDemo"></script>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer>
@@ -339,6 +382,23 @@
   loadHealth();
   loadFeed();
   setInterval(loadFeed, 15000);
+
+  // Embed snippet — origin is wherever the dashboard is served from
+  (function(){
+    var origin = location.origin;
+    var snip = '<script src="' + origin + '/widget.js"\n'
+      + '        data-from="KES" data-to="NGN" data-amount="100"><\/script>';
+    var pre = document.getElementById('embed');
+    if (pre) pre.textContent = snip;
+    // Live demo: inject the widget script right after the placeholder
+    var demo = document.getElementById('embedDemo');
+    if (demo) {
+      var s = document.createElement('script');
+      s.src = origin + '/widget.js';
+      s.dataset.from = 'KES'; s.dataset.to = 'NGN'; s.dataset.amount = '100';
+      demo.parentNode.insertBefore(s, demo.nextSibling);
+    }
+  })();
 </script>
 </body>
 </html>

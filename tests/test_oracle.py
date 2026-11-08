@@ -390,3 +390,138 @@ def test_api_cors_headers_present():
     )
     assert r.status_code == 200
     assert r.headers.get("access-control-allow-origin") == "*"
+
+
+# ─── GET /rate/{from}/{to} (cite-friendly endpoint) ──────────────────────────
+
+
+def test_api_rate_simple_get():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/KES/NGN")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "KES"
+    assert body["to"] == "NGN"
+    assert body["rate"] > 0
+    assert 0 < body["confidence"] <= 1
+    assert isinstance(body["providers"], list)
+
+
+def test_api_rate_404_on_unknown_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/USD/KES")
+    assert r.status_code == 404
+
+
+def test_api_rate_lowercase_currency_still_works():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/kes/ngn")
+    assert r.status_code == 200
+    assert r.json()["from"] == "KES"
+
+
+# ─── /widget.js embeddable widget ────────────────────────────────────────────
+
+
+def test_api_widget_js_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/widget.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript")
+    # The widget must reference the /convert endpoint and self-mount
+    assert "/convert" in r.text
+    assert "document.createElement" in r.text
+    # Cache-Control present so CDNs can serve it
+    assert "max-age" in r.headers.get("cache-control", "")
+
+
+# ─── AI-discoverability (GEO pass) ───────────────────────────────────────────
+
+
+def test_api_llms_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/llms.txt")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "Africa Oracle" in r.text
+
+
+def test_api_ai_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/ai.txt")
+    assert r.status_code == 200
+    assert "User-agent" in r.text
+
+
+def test_api_ai_plugin_json_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/ai-plugin.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema_version"] == "v1"
+    assert body["name_for_model"] == "africa_oracle"
+    assert body["api"]["type"] == "openapi"
+
+
+def test_api_security_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/security.txt")
+    assert r.status_code == 200
+    assert "Contact:" in r.text
+
+
+def test_api_dashboard_has_jsonld_and_og():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    # OpenGraph for AI search tools + social embeds
+    assert 'property="og:title"' in r.text
+    # Schema.org structured data for LLM citers
+    assert 'application/ld+json' in r.text
+    assert '"@type": "SoftwareApplication"' in r.text
+    # AI-friendly robots directive
+    assert 'name="robots"' in r.text
+
+
+def test_api_openapi_schema_published():
+    """OpenAPI schema is what the /.well-known/ai-plugin.json points to;
+    without it ChatGPT / Claude can't discover the tools."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    schema = r.json()
+    assert schema["info"]["title"] == "Africa Oracle Extraction Agent"
+    # All public endpoints advertised
+    paths = schema["paths"]
+    for p in ("/health", "/convert", "/rate/{from_ccy}/{to_ccy}", "/widget.js"):
+        assert p in paths, f"missing path in OpenAPI: {p}"

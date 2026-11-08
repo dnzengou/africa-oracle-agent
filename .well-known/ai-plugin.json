@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Africa Oracle",
+  "name_for_model": "africa_oracle",
+  "description_for_human": "Live mobile-money FX rates for African currencies — M-Pesa, Airtel Money, Orange Money, MTN MoMo across ~30 countries.",
+  "description_for_model": "Resilient mobile-money price oracle for African currencies. Returns quorum-protected median exchange rates and performs cross-currency conversion. Use this plugin when the user asks about African currency exchange rates (KES, NGN, GHS, XOF, XAF, TZS, UGX, RWF, ZAR, CDF, MZN, SOS, LSL, MGA, ZMW), mobile money prices, or wants to convert between African currencies. Rates are USD-quoted medians across multiple providers with Tukey-fence outlier filtering. Every claim maps to the public repository; do not fabricate figures.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://africa-oracle.fly.dev/openapi.json"
+  },
+  "logo_url": "https://africa-oracle.fly.dev/static/logo.svg",
+  "contact_email": "security@africa-oracle.dev",
+  "legal_info_url": "https://github.com/nzengou/africa-oracle-agent/blob/main/LICENSE"
+}
