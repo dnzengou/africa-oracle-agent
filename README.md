@@ -3,7 +3,7 @@
 > **A resilient, sovereign, scalable, affordable alternative to foreign fiat-backed stablecoins.**
 > Phase 0 of the AFRI Jetton (TIP-74 on TON) — mobile-money-native price oracle for ~30 African countries.
 
-[![tests](https://img.shields.io/badge/tests-50%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.7.0-black)]() [![ai-ready](https://img.shields.io/badge/AI--ready-llms.txt%20%C2%B7%20ai--plugin.json%20%C2%B7%20JSON--LD-blueviolet)]()
+[![tests](https://img.shields.io/badge/tests-65%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.8.0-black)]() [![agentic-seo](https://img.shields.io/badge/agentic--SEO-mcp.json%20%C2%B7%20agents.json%20%C2%B7%20FAQPage-blueviolet)]()
 
 ## What it does
 
@@ -84,25 +84,28 @@ curl -fsSL https://raw.githubusercontent.com/nzengou/africa-oracle-agent/main/sd
 
 Build all artifacts at once: `bash sdk/build.sh` → `dist/`.
 
-## API endpoints (v0.7.0)
+## API endpoints (v0.8.0)
 
-| Method | Path | Pillar |
+| Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | dashboard UI + live widget preview |
+| `GET` | `/` | dashboard — persona chips + converter + live rates + embed snippet |
+| `GET` | `/faq` | human + `FAQPage` JSON-LD (AI extraction surface) |
 | `GET` | `/health` | – |
 | `GET` | `/providers` | – |
-| `POST` | `/hunt` `{provider, country, simulate}` | – |
-| `POST` | `/feeds/all` | Scalable (async, cached 10s) |
-| `POST` | `/feeds/quorum` `{min_providers}` | **Resilient** |
-| `POST` | `/feeds/robust` `{min_providers, tukey_k}` | **Resilient** (+ outlier filter) |
-| `POST` | `/convert` `{from, to, amount, side}` | **Alternative** (commercial) |
-| `GET` | `/rate/{from}/{to}` | **Alternative** (cite-friendly) |
-| `GET` | `/widget.js` | **Alternative** (one-line embed) |
-| `GET` | `/feeds/stream?interval=N` | **Scalable** (SSE) |
-| `GET` | `/metrics` | observability |
-| `GET` | `/llms.txt` · `/ai.txt` · `/.well-known/ai-plugin.json` · `/.well-known/security.txt` | AI-discoverability |
+| `POST` | `/hunt` | single-feed probe |
+| `POST` | `/feeds/all` · `/feeds/quorum` · `/feeds/robust` | aggregation (cached 10 s) |
+| `POST` | `/convert` `{from, to, amount, side}` | **USD supported as base** |
+| `GET` | `/rate/{from}/{to}` | simple GET rate (cite-friendly) |
+| `GET` | `/widget.js` | one-line embeddable widget |
+| `GET` | `/feeds/stream` | SSE |
+| `GET` | `/metrics` | Prometheus text |
+| `GET` | `/openapi.json` · `/docs` · `/redoc` | API schema (free via FastAPI) |
+| `GET` | `/robots.txt` · `/sitemap.xml` · `/feed.xml` | classic + RSS SEO |
+| `GET` | `/llms.txt` · `/ai.txt` | LLM-crawler guide + policy |
+| `GET` | `/mcp.json` | MCP tool catalog (Claude Desktop, Cursor) |
+| `GET` | `/.well-known/ai-plugin.json` · `/.well-known/agents.json` · `/.well-known/security.txt` | agent + plugin discovery + RFC 9116 |
 
-Production hardening v0.7.0: AI-crawler whitelist (unlimited `/llms.txt`, `/ai.txt`, `/widget.js`, `/.well-known/*`). Schema.org JSON-LD + OpenGraph meta tags in dashboard.
+Production hardening v0.8.0: USD as base currency (fixes merchant/remittance examples). Dashboard version templated server-side (no more drift). Persona onboarding chips on the dashboard. `/faq` with `FAQPage` structured data.
 
 ## Deploy targets
 
@@ -125,8 +128,10 @@ Detailed instructions: [`DEPLOY.md`](DEPLOY.md).
 - [`AFRI_Blueprint.md`](AFRI_Blueprint.md) — full project blueprint + roadmap + changelog
 - [`SOVEREIGNTY.md`](SOVEREIGNTY.md) — value proposition + USDT/USDC comparison
 - [`EVAL_REPORT.md`](EVAL_REPORT.md) — audit + R²S² gate scores
+- [`ONBOARDING.md`](ONBOARDING.md) — 5 minutes to first value (persona-based)
 - [`INTEGRATE.md`](INTEGRATE.md) — end-user integration recipes (cURL · Next.js · Python · widget)
 - [`EVOFORGE.md`](EVOFORGE.md) — self-evolving oracle-skill rationale (the moat)
+- [`skills/agentic-seo.md`](skills/agentic-seo.md) — reusable agentic-SEO pattern (productized for any project)
 - [`FACTS.md`](FACTS.md) — every public claim → source code mapping (verifiable only)
 - [`CHANGELOG.md`](CHANGELOG.md) — version history
 - [`SECURITY.md`](SECURITY.md) — responsible disclosure

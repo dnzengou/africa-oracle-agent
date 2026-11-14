@@ -25,6 +25,7 @@ import json
 import sys
 import time
 from collections import defaultdict, deque
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -39,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from oracle_agent import PROVIDERS, OracleAgent, OracleAggregator, convert_amount  # noqa: E402
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 CACHE_TTL_S = 10
 RATE_LIMIT_PER_MIN = 60
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -99,6 +100,7 @@ _metrics: dict[str, int] = {
     "convert_requests_total": 0,
     "rate_requests_total": 0,
     "widget_requests_total": 0,
+    "seo_requests_total": 0,
     "cache_hits_total": 0,
     "cache_misses_total": 0,
     "rate_limited_total": 0,
@@ -128,7 +130,8 @@ _rate_buckets: dict[str, deque] = defaultdict(deque)
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
     path = request.url.path
-    if (path in ("/health", "/metrics", "/", "/llms.txt", "/ai.txt", "/widget.js")
+    if (path in ("/health", "/metrics", "/", "/llms.txt", "/ai.txt", "/widget.js",
+                 "/robots.txt", "/sitemap.xml", "/feed.xml", "/faq", "/mcp.json")
             or path.startswith("/static")
             or path.startswith("/.well-known/")
             or path.startswith("/openapi")
@@ -167,7 +170,8 @@ def _build_aggregator() -> OracleAggregator:
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     if DASHBOARD_PATH.exists():
-        return HTMLResponse(DASHBOARD_PATH.read_text(encoding="utf-8"))
+        html = DASHBOARD_PATH.read_text(encoding="utf-8").replace("{{VERSION}}", VERSION)
+        return HTMLResponse(html)
     return HTMLResponse(
         f"<h1>Africa Oracle {VERSION}</h1><p>API is running. See <a href='/docs'>/docs</a>.</p>"
     )
@@ -397,6 +401,292 @@ def ai_plugin() -> Response:
 def security_txt() -> Response:
     """RFC 9116 security contact."""
     return _serve_file(REPO_ROOT / ".well-known" / "security.txt", "text/plain; charset=utf-8")
+
+
+# ─── Classic + agentic SEO surfaces ──────────────────────────────────────────
+
+_PUBLIC_ORIGIN = "https://africa-oracle.fly.dev"
+_PUBLIC_PATHS = [
+    ("/", "daily", "1.0"),
+    ("/faq", "weekly", "0.9"),
+    ("/docs", "weekly", "0.8"),
+    ("/redoc", "weekly", "0.7"),
+    ("/providers", "weekly", "0.6"),
+    ("/health", "always", "0.3"),
+]
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots_txt() -> Response:
+    """Classic robots.txt — explicit allows for AI bots + sitemap pointer."""
+    _metrics["seo_requests_total"] += 1
+    lines = [
+        "User-agent: *",
+        "Allow: /",
+        "",
+    ]
+    for bot in ("GPTBot", "ClaudeBot", "anthropic-ai", "Google-Extended",
+                "PerplexityBot", "CCBot", "OAI-SearchBot", "Applebot-Extended"):
+        lines.append(f"User-agent: {bot}")
+        lines.append("Allow: /")
+        lines.append("")
+    lines.append(f"Sitemap: {_PUBLIC_ORIGIN}/sitemap.xml")
+    lines.append(f"Sitemap: {_PUBLIC_ORIGIN}/llms.txt")
+    return Response("\n".join(lines) + "\n", media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml() -> Response:
+    """XML sitemap — the classic surface still read by every indexer."""
+    _metrics["seo_requests_total"] += 1
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    urls = "\n".join(
+        f'  <url><loc>{_PUBLIC_ORIGIN}{path}</loc>'
+        f'<lastmod>{today}</lastmod>'
+        f'<changefreq>{freq}</changefreq>'
+        f'<priority>{pri}</priority></url>'
+        for path, freq, pri in _PUBLIC_PATHS
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f'{urls}\n</urlset>\n'
+    )
+    return Response(body, media_type="application/xml")
+
+
+@app.get("/feed.xml")
+async def feed_xml() -> Response:
+    """RSS 2.0 of the current robust feed. Every price update since
+    the cache rolled is one <item>. Consumed by RSS readers, Zapier,
+    Make.com, IFTTT, and every LLM that still indexes feeds."""
+    _metrics["seo_requests_total"] += 1
+    data = await _cached(
+        "robust:1:1.5",
+        lambda: _build_aggregator().robust_quorum_aggregate(1, 1.5),
+    )
+    oracle_id = data.get("oracle_id", "feed")
+    ts = data.get("timestamp", int(time.time()))
+    build_date = datetime.utcfromtimestamp(ts).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    items = []
+    for p in data.get("prices", []):
+        ccy = p["currency"]
+        title = f"{ccy} · 1 USD = {p['mid_price']} {ccy}"
+        desc = (f"Median price across {p['agent_count']} agents · "
+                f"{', '.join(p['providers'])} · "
+                f"spread {p['spread_bps']}bps · "
+                f"confidence {p['avg_confidence']*100:.1f}%")
+        guid = f"{oracle_id}:{ccy}:{ts}"
+        items.append(
+            f"<item>"
+            f"<title>{title}</title>"
+            f"<link>{_PUBLIC_ORIGIN}/rate/USD/{ccy}</link>"
+            f"<guid isPermaLink=\"false\">{guid}</guid>"
+            f"<pubDate>{build_date}</pubDate>"
+            f"<description>{desc}</description>"
+            f"</item>"
+        )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+        '<channel>\n'
+        '  <title>Africa Oracle · Live Rates</title>\n'
+        f'  <link>{_PUBLIC_ORIGIN}/</link>\n'
+        f'  <atom:link href="{_PUBLIC_ORIGIN}/feed.xml" rel="self" type="application/rss+xml" />\n'
+        '  <description>Live median FX rates for African currencies — '
+        'M-Pesa, Airtel, Orange, MTN. Updated every 10 seconds.</description>\n'
+        '  <language>en</language>\n'
+        f'  <lastBuildDate>{build_date}</lastBuildDate>\n'
+        f'  <ttl>1</ttl>\n'
+        + "\n  ".join(items)
+        + '\n</channel>\n</rss>\n'
+    )
+    return Response(body, media_type="application/rss+xml")
+
+
+# ─── /.well-known/agents.json — emerging agent-discovery manifest ────────────
+@app.get("/.well-known/agents.json")
+def agents_json() -> dict:
+    """Agent-to-agent discovery (A2A / AGNTCY lineage). Lets other AI
+    agents discover this oracle's capabilities as a first-class peer."""
+    _metrics["seo_requests_total"] += 1
+    return {
+        "schema_version": "0.1",
+        "name": "africa-oracle",
+        "display_name": "Africa Oracle",
+        "description": "Resilient mobile-money price oracle for African currencies.",
+        "version": VERSION,
+        "vendor": {
+            "name": "Africa Oracle contributors",
+            "url": "https://github.com/nzengou/africa-oracle-agent",
+        },
+        "endpoints": {
+            "base_url": _PUBLIC_ORIGIN,
+            "openapi": f"{_PUBLIC_ORIGIN}/openapi.json",
+            "mcp": f"{_PUBLIC_ORIGIN}/mcp.json",
+            "sse": f"{_PUBLIC_ORIGIN}/feeds/stream",
+        },
+        "capabilities": [
+            "currency.convert",
+            "currency.rate",
+            "currency.list",
+            "feed.aggregate",
+            "feed.stream",
+        ],
+        "authentication": {"type": "none", "rate_limit_per_minute": RATE_LIMIT_PER_MIN},
+        "facts_url": "https://github.com/nzengou/africa-oracle-agent/blob/main/FACTS.md",
+        "license": "https://github.com/nzengou/africa-oracle-agent/blob/main/LICENSE",
+    }
+
+
+# ─── /mcp.json — Model Context Protocol tool descriptor ──────────────────────
+@app.get("/mcp.json")
+def mcp_json() -> dict:
+    """MCP tool descriptor — lets Claude Desktop, Cursor, and other
+    MCP-aware agents wire the oracle in as native tools."""
+    _metrics["seo_requests_total"] += 1
+    return {
+        "schema_version": "mcp-tools/0.1",
+        "server": {
+            "name": "africa-oracle",
+            "version": VERSION,
+            "description": "Live mobile-money FX for African currencies.",
+            "transport": "http",
+            "base_url": _PUBLIC_ORIGIN,
+        },
+        "tools": [
+            {
+                "name": "convert_currency",
+                "description": "Convert an amount between two currencies using the quorum-protected oracle feed. USD is supported as the base currency.",
+                "method": "POST",
+                "path": "/convert",
+                "input_schema": {
+                    "type": "object",
+                    "required": ["from", "to", "amount"],
+                    "properties": {
+                        "from": {"type": "string", "description": "ISO 4217 source currency (USD, KES, NGN, ...)"},
+                        "to": {"type": "string", "description": "ISO 4217 target currency"},
+                        "amount": {"type": "number", "minimum": 0},
+                        "side": {"type": "string", "enum": ["mid", "buy", "sell"], "default": "mid"},
+                    },
+                },
+            },
+            {
+                "name": "get_rate",
+                "description": "Get the current exchange rate between two currencies.",
+                "method": "GET",
+                "path_template": "/rate/{from}/{to}",
+            },
+            {
+                "name": "list_providers",
+                "description": "List configured mobile-money providers and the countries/currencies they cover.",
+                "method": "GET",
+                "path": "/providers",
+            },
+            {
+                "name": "robust_feed",
+                "description": "Full aggregated feed with Tukey-fence outlier filter and quorum protection.",
+                "method": "POST",
+                "path": "/feeds/robust",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "min_providers": {"type": "integer", "minimum": 1, "maximum": 4, "default": 2},
+                        "tukey_k": {"type": "number", "minimum": 0.5, "maximum": 3.0, "default": 1.5},
+                    },
+                },
+            },
+        ],
+    }
+
+
+# ─── /faq — human + machine-readable FAQ (FAQPage JSON-LD) ───────────────────
+_FAQ = [
+    ("What is Africa Oracle?",
+     "A resilient price oracle that aggregates live mobile-money FX rates from M-Pesa, Airtel Money, Orange Money, and MTN MoMo across about 30 African countries into a quorum-protected, outlier-filtered median rate. It is Phase 0 of the AFRI Jetton stablecoin on TON (TIP-74)."),
+    ("Which currencies are supported?",
+     "KES, TZS, UGX, RWF, ZAR, GHS, CDF, LSL, MZN, SOS, XOF, XAF, MGA, NGN, ZMW. USD is supported as a base currency. The ground truth is the REFERENCE_RATES constant in oracle_agent.py."),
+    ("Is the oracle using real provider APIs?",
+     "Not yet. In the current version the --simulate path is the default and only mode. The _real_fetch() method raises NotImplementedError. Real API integration is Phase 1 and requires provider API keys at the provider boundary."),
+    ("How do I get a rate for USD to Kenyan shillings?",
+     "GET https://africa-oracle.fly.dev/rate/USD/KES. The response contains rate, confidence, spread_bps, and the list of providers backing the quote."),
+    ("How do I embed live rates on my site?",
+     "One line of JS: <script src=\"https://africa-oracle.fly.dev/widget.js\" data-from=\"KES\" data-to=\"NGN\" data-amount=\"100\"></script>. See INTEGRATE.md for Next.js, React, Python, Node, and SSE examples."),
+    ("What is the rate limit?",
+     "60 requests per minute per IP on data endpoints. Static surfaces (/, /widget.js, /llms.txt, /ai.txt, /.well-known/*, /openapi.json, /docs, /redoc) are unlimited."),
+    ("What is the Tukey-fence outlier filter?",
+     "A classical statistical fence: values outside Q1 - 1.5*IQR and Q3 + 1.5*IQR are rejected. It defends the published median against a single compromised provider trying to sway the rate."),
+    ("Is this project centralized?",
+     "The oracle is self-hostable on any African VPS via docker-compose. The TON Jetton smart contract (afri-token.fc) is open source. The maintained public deployment is one instance; others can run their own and compare with /metrics."),
+    ("Can I use this in production?",
+     "For simulated data: yes, immediately. For production financial decisions that require live mobile-money rates, wait for Phase 1 real-API integration or self-host with your own provider credentials."),
+    ("How do AI agents use this?",
+     "Three ways: (1) read /.well-known/ai-plugin.json and call the OpenAPI schema; (2) read /mcp.json and register the tools with an MCP client like Claude Desktop; (3) read /.well-known/agents.json for agent-to-agent discovery."),
+    ("Where do the simulated prices come from?",
+     "REFERENCE_RATES in oracle_agent.py are hand-bootstrapped seeds. The simulator adds Gaussian noise proportional to provider density plus a volume-of-day multiplier. See the _simulate_price method for the full model."),
+    ("What is the AFRI Jetton?",
+     "A TIP-74 fungible token on the TON blockchain, intended to be 120% over-collateralized by mobile-money reserves. The contract scaffold is in afri-token.fc. It is not deployed to mainnet. See AFRI_Blueprint.md for the roadmap."),
+    ("How is this different from USDT or USDC on African payment rails?",
+     "USDT/USDC are USD-backed stablecoins. AFRI aims to be mobile-money-native, priced directly against African local currencies through this oracle. The comparison is documented in SOVEREIGNTY.md."),
+    ("Who maintains this project?",
+     "It is open source. See CONTRIBUTING.md to contribute, CITATION.cff for citation metadata, and SECURITY.md for the responsible-disclosure policy."),
+    ("How can I verify a claim about this project?",
+     "Every public claim maps to a file or function in the repository. See FACTS.md for the ledger."),
+]
+
+
+@app.get("/faq", response_class=HTMLResponse)
+def faq() -> HTMLResponse:
+    """FAQ page with FAQPage JSON-LD — big LLM citation surface."""
+    _metrics["seo_requests_total"] += 1
+    qa_rows = "".join(
+        f'<details><summary>{q}</summary><p>{a}</p></details>'
+        for q, a in _FAQ
+    )
+    jsonld = json.dumps({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {"@type": "Question", "name": q,
+             "acceptedAnswer": {"@type": "Answer", "text": a}}
+            for q, a in _FAQ
+        ],
+    })
+    html = (
+        '<!doctype html><html lang="en"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Africa Oracle · FAQ</title>'
+        '<meta name="description" content="Frequently asked questions about Africa Oracle: a resilient mobile-money FX price oracle for African currencies.">'
+        '<link rel="canonical" href="https://africa-oracle.fly.dev/faq">'
+        '<meta property="og:title" content="Africa Oracle · FAQ">'
+        '<meta name="robots" content="index,follow,max-snippet:-1">'
+        f'<script type="application/ld+json">{jsonld}</script>'
+        '<style>'
+        ':root{--bg:#f6f8fb;--fg:#0b1220;--muted:#5c6473;--card:#fff;--border:#e5e9f0;--accent:#d97706}'
+        '@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--fg:#e6ebf5;--muted:#8b93a7;--card:#131b2e;--border:#1f2a44;--accent:#f59e0b}}'
+        'body{margin:0;padding:40px 20px;font:16px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:720px;margin-inline:auto}'
+        'h1{margin:0 0 8px;font-size:22px}'
+        'p.lede{color:var(--muted);margin:0 0 24px}'
+        'details{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:8px 0}'
+        'summary{font-weight:600;cursor:pointer}'
+        'details[open] summary{margin-bottom:8px}'
+        'details p{margin:0;color:var(--muted)}'
+        'nav{margin-top:40px;padding-top:20px;border-top:1px solid var(--border);font-size:13px;color:var(--muted)}'
+        'nav a{color:var(--accent);text-decoration:none}'
+        '</style></head><body>'
+        '<h1>Africa Oracle · FAQ</h1>'
+        '<p class="lede">Every answer below maps to a file or function in the <a href="https://github.com/nzengou/africa-oracle-agent">source repository</a>. See <a href="https://github.com/nzengou/africa-oracle-agent/blob/main/FACTS.md">FACTS.md</a> for the full ledger.</p>'
+        f'{qa_rows}'
+        '<nav>'
+        '<a href="/">dashboard</a> · '
+        '<a href="/docs">API docs</a> · '
+        '<a href="/llms.txt">llms.txt</a> · '
+        '<a href="/mcp.json">mcp.json</a> · '
+        '<a href="/.well-known/agents.json">agents.json</a>'
+        '</nav></body></html>'
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

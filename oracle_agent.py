@@ -350,20 +350,31 @@ def convert_amount(feed: dict, from_ccy: str, to_ccy: str,
     """Cross-currency conversion using an aggregated feed (both currencies
     priced against USD reference). Returns amount + rate + confidence.
 
+    USD is the base of the feed by construction, so USD<->any is supported
+    directly with rate 1.0 (unit confidence, zero spread on the USD leg).
+
     side ∈ {"mid", "buy", "sell"}:
       - "mid":  neutral (mid-price both legs)
       - "buy":  consumer buying `to_ccy` — sell `from_ccy` at buy price, buy `to_ccy` at sell price
       - "sell": consumer selling `to_ccy` back — opposite legs
     """
     prices = {p["currency"]: p for p in feed.get("prices", [])}
+    # Synthetic USD leg — USD is the base of the feed, so 1 USD == 1 USD.
+    USD_LEG = {
+        "buy_price": 1.0, "sell_price": 1.0, "mid_price": 1.0,
+        "spread": 0.0, "avg_confidence": 1.0,
+        "providers": ["USD (base)"], "currency": "USD",
+    }
+    prices.setdefault("USD", USD_LEG)
+
     if from_ccy not in prices or to_ccy not in prices:
         missing = [c for c in (from_ccy, to_ccy) if c not in prices]
         raise ValueError(f"unsupported currency: {', '.join(missing)}")
 
     src, dst = prices[from_ccy], prices[to_ccy]
     if side == "buy":
-        src_rate = src["buy_price"]   # sell from_ccy → get less USD
-        dst_rate = dst["sell_price"]  # buy to_ccy   → cost more of it
+        src_rate = src["buy_price"]
+        dst_rate = dst["sell_price"]
     elif side == "sell":
         src_rate = src["sell_price"]
         dst_rate = dst["buy_price"]
@@ -371,7 +382,6 @@ def convert_amount(feed: dict, from_ccy: str, to_ccy: str,
         src_rate = src["mid_price"]
         dst_rate = dst["mid_price"]
 
-    # from_ccy → USD → to_ccy (both quoted as ccy/USD, so divide then multiply)
     usd_amount = amount / src_rate
     to_amount = usd_amount * dst_rate
     rate = dst_rate / src_rate

@@ -166,23 +166,27 @@ Use case: a Nairobi merchant displays a product priced in USD but accepts KES; k
 ```html
 <div>
   Price:
-  <span id="usd">$29.99</span>
+  <span>$29.99</span>
   <span>·</span>
-  <span id="kes"></span>
+  <span id="kes">—</span>
 </div>
 <script>
   async function refresh() {
-    const { rate } = await fetch("https://africa-oracle.fly.dev/rate/USD/KES").then(r => r.json())
-      .catch(() => ({ rate: null }));
-    // USD→KES not directly in feed — compute via KES mid: 1 USD costs `KES mid-price`
-    const r = await fetch("https://africa-oracle.fly.dev/rate/KES/KES").then(r => r.json()); // placeholder
-    document.getElementById("kes").textContent = r ? `KES ${(29.99 * r.rate).toFixed(0)}` : "—";
+    const r = await fetch("https://africa-oracle.fly.dev/rate/USD/KES").then(r => r.json());
+    document.getElementById("kes").textContent = "KES " + (29.99 * r.rate).toFixed(0);
   }
   refresh(); setInterval(refresh, 30000);
 </script>
 ```
 
-Note: the oracle quotes African currencies vs USD internally. To price USD → KES, use `/rate/KES/KES` (identity) with the raw `mid_price` from `/feeds/robust` instead. A cleaner pattern is to anchor product prices in a hard currency and cache the conversion rate for 10–30 s.
+USD is supported as a synthetic base currency with rate 1.0 by construction — no triangulation needed.
+
+Alternatively, drop the embed widget with a pre-set amount:
+
+```html
+<script src="https://africa-oracle.fly.dev/widget.js"
+        data-from="USD" data-to="KES" data-amount="29.99"></script>
+```
 
 ## Remittance: price a transfer
 
@@ -203,7 +207,7 @@ Pick `side`:
 
 ## Rate limits, CORS, caching
 
-- **Rate limit**: 60 requests / minute / IP on `/hunt`, `/feeds/*`, `/convert`, `/rate/*`. `/health`, `/metrics`, `/`, `/widget.js`, `/llms.txt`, `/ai.txt`, `/.well-known/*` are unlimited.
+- **Rate limit**: 60 requests / minute / IP on `/hunt`, `/feeds/*`, `/convert`, `/rate/*`. Unlimited: `/`, `/health`, `/metrics`, `/widget.js`, `/llms.txt`, `/ai.txt`, `/robots.txt`, `/sitemap.xml`, `/feed.xml`, `/faq`, `/mcp.json`, `/.well-known/*`, `/openapi.json`, `/docs`, `/redoc`.
 - **CORS**: `Access-Control-Allow-Origin: *` on all endpoints. You can call the API from any browser.
 - **Caching**: the server caches aggregated feeds for 10 s. Rapid successive requests return the same snapshot. Widget refreshes every 30 s by default; adjust via its own timer if you fork it.
 - **Self-host**: if you expect >60 req/min from a single IP (e.g. server-side rendering a lot of pages), self-host via `docker compose up` (see [DEPLOY.md](DEPLOY.md)) and bypass the shared rate limit entirely.

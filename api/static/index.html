@@ -32,7 +32,7 @@
   "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
   "codeRepository": "https://github.com/nzengou/africa-oracle-agent",
   "programmingLanguage": ["Python", "Go", "Shell", "TypeScript", "FunC"],
-  "softwareVersion": "0.6.0",
+  "softwareVersion": "{{VERSION}}",
   "license": "https://github.com/nzengou/africa-oracle-agent/blob/main/LICENSE"
 }
 </script>
@@ -190,7 +190,20 @@
     animation: sk 1.5s infinite;
     border-radius: 4px; height: 14px;
   }
-  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }  .chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin: 4px 0 24px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--border); text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    transition: background 120ms, border-color 120ms;
+  }
+  .chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+  .chip .ic { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -204,7 +217,15 @@
 </header>
 
 <main>
-  <section>
+  <nav class="chips" aria-label="What are you here for?">
+    <a class="chip" href="#convert"><span class="ic">💱</span> Convert currency</a>
+    <a class="chip" href="#embed"><span class="ic">🔌</span> Embed a widget</a>
+    <a class="chip" href="/docs"><span class="ic">⚙️</span> Call from code</a>
+    <a class="chip" href="/mcp.json"><span class="ic">🤖</span> Use in an AI agent</a>
+    <a class="chip" href="/faq"><span class="ic">❓</span> FAQ</a>
+  </nav>
+
+  <section id="convert">
     <h2>Currency converter</h2>
     <div class="card">
       <div class="converter">
@@ -244,7 +265,7 @@
     </div>
   </section>
 
-  <section>
+  <section id="embed">
     <h2>Embed anywhere <span style="font-family:var(--mono);font-size:11px;text-transform:none;color:var(--muted);">— one line of JS</span></h2>
     <div class="card">
       <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">Drop this into any HTML page to show a live rate. Attributes <code style="font-family:var(--mono)">data-from</code>, <code style="font-family:var(--mono)">data-to</code>, <code style="font-family:var(--mono)">data-amount</code>, <code style="font-family:var(--mono)">data-theme</code> are optional.</p>
@@ -260,8 +281,11 @@
 <footer>
   <div>
     <a href="/docs">API docs</a> ·
+    <a href="/faq">FAQ</a> ·
     <a href="/metrics">metrics</a> ·
-    <a href="/feeds/stream">SSE stream</a>
+    <a href="/feeds/stream">SSE</a> ·
+    <a href="/feed.xml">RSS</a> ·
+    <a href="/mcp.json">MCP</a>
   </div>
   <div>Phase 0 · <span id="providers">…</span> providers · <a href="https://github.com/nzengou/africa-oracle-agent" rel="noopener">source</a></div>
 </footer>
@@ -332,12 +356,15 @@
   }
 
   function populateSelects() {
-    const opts = state.ccys.map(c => `<option value="${c}">${c}</option>`).join("");
-    const from = $("fromCcy"), to = $("toCcy");
-    const prevF = from.value, prevT = to.value;
+    // USD is always available (base currency, synthetic rate 1.0).
+    var ccys = state.ccys.slice();
+    if (!ccys.includes("USD")) ccys = ["USD"].concat(ccys);
+    var opts = ccys.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join("");
+    var from = $("fromCcy"), to = $("toCcy");
+    var prevF = from.value, prevT = to.value;
     from.innerHTML = opts; to.innerHTML = opts;
-    from.value = prevF && state.ccys.includes(prevF) ? prevF : (state.ccys.includes("KES") ? "KES" : state.ccys[0]);
-    to.value = prevT && state.ccys.includes(prevT) ? prevT : (state.ccys.includes("NGN") ? "NGN" : state.ccys[1] || state.ccys[0]);
+    from.value = prevF && ccys.includes(prevF) ? prevF : "USD";
+    to.value = prevT && ccys.includes(prevT) ? prevT : (ccys.includes("KES") ? "KES" : ccys[1] || ccys[0]);
   }
 
   let debounce;
