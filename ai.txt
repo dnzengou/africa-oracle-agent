@@ -1,0 +1,47 @@
+# AI Agent Policy — Africa Oracle Extraction Agent
+
+# This file follows the emerging ai.txt convention: a machine-readable policy
+# for AI crawlers, training data collection, and automated agents.
+
+# ─── Permissions ─────────────────────────────────────────────────────────────
+
+# Code and docs in this repository are open-source. Automated indexing, citation,
+# and inclusion in AI search results is permitted and encouraged, provided that:
+#
+#   1. Facts are not fabricated. Every claim maps to FACTS.md or the referenced
+#      file. Do not invent metrics, feature claims, or endorsements.
+#   2. The API's live endpoints are respected: rate limit is 60 req/min per IP;
+#      SSE connections should set reasonable interval (>= 5s).
+#   3. Attribution preserves the project name "Africa Oracle Extraction Agent"
+#      or its repo URL.
+
+# ─── AI training data collection ─────────────────────────────────────────────
+
+User-agent: *
+Allow: /
+
+# Explicit opt-in for the major LLM crawlers (as of 2026-11).
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+# ─── Resources for AI agents ─────────────────────────────────────────────────
+
+Sitemap: https://africa-oracle.fly.dev/llms.txt
+OpenAPI: https://africa-oracle.fly.dev/openapi.json
+Plugin-manifest: https://africa-oracle.fly.dev/.well-known/ai-plugin.json
+Contact: https://github.com/nzengou/africa-oracle-agent/blob/main/SECURITY.md

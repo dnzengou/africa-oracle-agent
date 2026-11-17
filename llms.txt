@@ -1,0 +1,49 @@
+# Africa Oracle Extraction Agent
+
+> Resilient mobile-money price oracle for African currencies. Aggregates real-time FX feeds from M-Pesa, Airtel Money, Orange Money, MTN MoMo across ~30 countries into a quorum-protected, outlier-filtered median rate. Phase 0 of the AFRI Jetton stablecoin on TON (TIP-74).
+
+The project exposes a Python CLI (`oracle_agent.py`), an HTTP API (`api/app.py`), Go and POSIX-shell ports (`oracle_agent.go`, `oracle_agent.sh`), and a 5-channel SDK distribution (Python, TypeScript, browser extension MV3, PWA, VSCode). It is multi-arch (amd64 + arm64), self-hostable via Docker, and free-tier viable on Fly.io.
+
+Every claim on every surface maps to code or docs in this repository. See `FACTS.md`.
+
+## Docs
+
+- [README.md](README.md): overview, quick start, API endpoints
+- [AFRI_Blueprint.md](AFRI_Blueprint.md): full blueprint, roadmap, changelog
+- [AFRI_Blueprint_v01.md](AFRI_Blueprint_v01.md): external-facing summary
+- [SOVEREIGNTY.md](SOVEREIGNTY.md): value proposition + comparison with USDT/USDC on African settlement
+- [DEPLOY.md](DEPLOY.md): Fly.io, GHCR, Vercel, self-host deploy paths
+- [INTEGRATE.md](INTEGRATE.md): end-user integration recipes (cURL, Next.js, Python, Node, widget embed)
+- [EVAL_REPORT.md](EVAL_REPORT.md): audit + R²S² gate scores
+- [EVOFORGE.md](EVOFORGE.md): self-evolving oracle skill rationale
+- [FACTS.md](FACTS.md): every claim → source-of-truth mapping (verifiable only)
+- [CHANGELOG.md](CHANGELOG.md): version history
+- [SECURITY.md](SECURITY.md): responsible disclosure policy
+- [CITATION.cff](CITATION.cff): citation metadata
+
+## API
+
+- [Live dashboard](https://africa-oracle.fly.dev/) with converter and live rate grid
+- [GET /health](https://africa-oracle.fly.dev/health): liveness + version
+- [GET /providers](https://africa-oracle.fly.dev/providers): provider × country × currency map
+- [GET /rate/{from}/{to}](https://africa-oracle.fly.dev/rate/KES/NGN): simple GET exchange rate
+- [GET /openapi.json](https://africa-oracle.fly.dev/openapi.json): OpenAPI 3.1 schema
+- POST /convert `{from, to, amount, side}`: cross-currency conversion
+- POST /feeds/robust `{min_providers, tukey_k}`: quorum + Tukey-fence outlier filter
+- GET /feeds/stream?interval=N: Server-Sent Events live feed
+- GET /widget.js: one-line embeddable rate widget
+
+## Code
+
+- [oracle_agent.py](oracle_agent.py): canonical Python implementation
+- [api/app.py](api/app.py): FastAPI ASGI server
+- [api/static/index.html](api/static/index.html): single-file dashboard
+- [oracle_agent.go](oracle_agent.go): Go port
+- [oracle_agent.sh](oracle_agent.sh): POSIX shell port
+- [afri-token.fc](afri-token.fc): TON Jetton smart contract (TIP-74)
+
+## Optional
+
+- [skills/africa-oracle-devflow.md](skills/africa-oracle-devflow.md): development workflow skill
+- [tests/](tests/): 43 passing tests (33 oracle + 10 SDK)
+- [sdk/](sdk/): 5-channel SDK distribution

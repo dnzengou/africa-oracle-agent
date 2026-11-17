@@ -305,3 +305,373 @@ def test_api_robust_rejects_invalid_tukey():
     # tukey_k above the upper bound (3.0)
     r = client.post("/feeds/robust", json={"min_providers": 2, "tukey_k": 10})
     assert r.status_code == 422
+
+
+# ─── /convert endpoint (Alternative pillar — commercial use case) ────────────
+
+
+def test_convert_amount_mid_side():
+    from oracle_agent import convert_amount
+
+    feed = {"prices": [
+        {"currency": "KES", "buy_price": 149.0, "sell_price": 151.0,
+         "mid_price": 150.0, "spread": 0.013, "avg_confidence": 0.95,
+         "providers": ["Safaricom M-Pesa", "Airtel Money"]},
+        {"currency": "NGN", "buy_price": 1549.0, "sell_price": 1551.0,
+         "mid_price": 1550.0, "spread": 0.001, "avg_confidence": 0.90,
+         "providers": ["MTN MoMo"]},
+    ]}
+    out = convert_amount(feed, "KES", "NGN", 1000.0, side="mid")
+    # 1000 KES / 150 = 6.667 USD × 1550 = ~10333 NGN
+    assert out["from"]["currency"] == "KES"
+    assert out["to"]["currency"] == "NGN"
+    assert 10000 < out["to"]["amount"] < 10500
+    assert out["rate"] > 0
+    assert out["side"] == "mid"
+
+
+def test_convert_amount_unknown_currency_raises():
+    from oracle_agent import convert_amount
+
+    feed = {"prices": [
+        {"currency": "KES", "buy_price": 149.0, "sell_price": 151.0,
+         "mid_price": 150.0, "spread": 0.013, "avg_confidence": 0.95,
+         "providers": ["S"]},
+    ]}
+    import pytest
+    with pytest.raises(ValueError):
+        convert_amount(feed, "KES", "ZZZ", 100.0)
+
+
+def test_api_convert_endpoint():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/convert", json={"from": "KES", "to": "NGN", "amount": 100})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"]["currency"] == "KES"
+    assert body["to"]["currency"] == "NGN"
+    assert body["to"]["amount"] > 0
+
+
+def test_api_convert_rejects_unknown_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    # ZZZ is not a real ISO 4217 code and not in the feed; USD is now supported
+    r = client.post("/convert", json={"from": "ZZZ", "to": "KES", "amount": 100})
+    assert r.status_code == 400
+
+
+def test_api_dashboard_served_at_root():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Africa Oracle" in r.text
+    assert r.headers["content-type"].startswith("text/html")
+
+
+def test_api_cors_headers_present():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.options(
+        "/feeds/all",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "*"
+
+
+# ─── GET /rate/{from}/{to} (cite-friendly endpoint) ──────────────────────────
+
+
+def test_api_rate_simple_get():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/KES/NGN")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "KES"
+    assert body["to"] == "NGN"
+    assert body["rate"] > 0
+    assert 0 < body["confidence"] <= 1
+    assert isinstance(body["providers"], list)
+
+
+def test_api_rate_404_on_unknown_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    # ZZZ is not a real ISO 4217 code and not in the feed
+    r = client.get("/rate/ZZZ/KES")
+    assert r.status_code == 404
+
+
+def test_api_rate_lowercase_currency_still_works():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/kes/ngn")
+    assert r.status_code == 200
+    assert r.json()["from"] == "KES"
+
+
+# ─── /widget.js embeddable widget ────────────────────────────────────────────
+
+
+def test_api_widget_js_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/widget.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript")
+    # The widget must reference the /convert endpoint and self-mount
+    assert "/convert" in r.text
+    assert "document.createElement" in r.text
+    # Cache-Control present so CDNs can serve it
+    assert "max-age" in r.headers.get("cache-control", "")
+
+
+# ─── AI-discoverability (GEO pass) ───────────────────────────────────────────
+
+
+def test_api_llms_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/llms.txt")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "Africa Oracle" in r.text
+
+
+def test_api_ai_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/ai.txt")
+    assert r.status_code == 200
+    assert "User-agent" in r.text
+
+
+def test_api_ai_plugin_json_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/ai-plugin.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema_version"] == "v1"
+    assert body["name_for_model"] == "africa_oracle"
+    assert body["api"]["type"] == "openapi"
+
+
+def test_api_security_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/security.txt")
+    assert r.status_code == 200
+    assert "Contact:" in r.text
+
+
+def test_api_dashboard_has_jsonld_and_og():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    # OpenGraph for AI search tools + social embeds
+    assert 'property="og:title"' in r.text
+    # Schema.org structured data for LLM citers
+    assert 'application/ld+json' in r.text
+    assert '"@type": "SoftwareApplication"' in r.text
+    # AI-friendly robots directive
+    assert 'name="robots"' in r.text
+
+
+def test_api_openapi_schema_published():
+    """OpenAPI schema is what the /.well-known/ai-plugin.json points to;
+    without it ChatGPT / Claude can't discover the tools."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    schema = r.json()
+    assert schema["info"]["title"] == "Africa Oracle Extraction Agent"
+    # All public endpoints advertised
+    paths = schema["paths"]
+    for p in ("/health", "/convert", "/rate/{from_ccy}/{to_ccy}", "/widget.js"):
+        assert p in paths, f"missing path in OpenAPI: {p}"
+
+
+# ─── USD as synthetic base (fixes merchant/remittance examples) ──────────────
+
+
+def test_convert_usd_to_kes_works():
+    """USD must work even though it isn't in REFERENCE_RATES — the aggregator
+    feed is USD-quoted by construction, so USD is a synthetic base at 1.0."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/convert", json={"from": "USD", "to": "KES", "amount": 100})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"]["currency"] == "USD"
+    assert body["to"]["currency"] == "KES"
+    # KES is around 150/USD, so 100 USD → ~15,000 KES. Allow wide band for simulator noise.
+    assert 10_000 < body["to"]["amount"] < 20_000
+
+
+def test_rate_usd_to_any_works():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/USD/NGN")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "USD"
+    assert body["to"] == "NGN"
+    assert body["rate"] > 0
+
+
+def test_convert_amount_usd_identity():
+    from oracle_agent import convert_amount
+
+    # USD → USD must be exactly identity, even with an empty feed
+    out = convert_amount({"prices": []}, "USD", "USD", 42.0)
+    assert out["to"]["amount"] == 42.0
+    assert out["rate"] == 1.0
+
+
+# ─── Classic + agentic SEO surfaces ──────────────────────────────────────────
+
+
+def test_api_robots_txt():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/robots.txt")
+    assert r.status_code == 200
+    # Explicit AI-bot allows
+    for bot in ("GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"):
+        assert bot in r.text, f"missing {bot} in robots.txt"
+    assert "Sitemap:" in r.text
+
+
+def test_api_sitemap_xml():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/sitemap.xml")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/xml")
+    assert "<urlset" in r.text
+    assert "<loc>" in r.text
+
+
+def test_api_feed_xml():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/feed.xml")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/rss+xml")
+    assert "<rss" in r.text and "</rss>" in r.text
+    assert "<item>" in r.text  # at least one rate item
+
+
+def test_api_faq_page_has_jsonld_faqpage():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/faq")
+    assert r.status_code == 200
+    # Schema.org FAQPage is the whole point
+    assert '"@type": "FAQPage"' in r.text
+    assert '"@type": "Question"' in r.text
+    # Canonical URL + robots directive
+    assert 'rel="canonical"' in r.text
+
+
+def test_api_agents_json_discovery():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/agents.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "africa-oracle"
+    assert "capabilities" in body and len(body["capabilities"]) >= 3
+    assert body["endpoints"]["mcp"].endswith("/mcp.json")
+
+
+def test_api_mcp_json_tool_catalog():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/mcp.json")
+    assert r.status_code == 200
+    body = r.json()
+    tool_names = {t["name"] for t in body["tools"]}
+    assert {"convert_currency", "get_rate", "list_providers"} <= tool_names
+    # convert_currency must declare its JSON schema for the MCP client
+    convert = next(t for t in body["tools"] if t["name"] == "convert_currency")
+    assert "input_schema" in convert
+
+
+def test_dashboard_version_is_templated():
+    """Catches version drift — the dashboard must show the running VERSION,
+    not a stale hardcoded string from a previous release."""
+    from fastapi.testclient import TestClient
+    from api.app import app, VERSION
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    # The templated version token must be gone and the real version present
+    assert "{{VERSION}}" not in r.text
+    assert f'"softwareVersion": "{VERSION}"' in r.text
+
+
+def test_dashboard_has_persona_chips():
+    """Onboarding chips must be present and lead to the right anchors."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    for href in ('#convert', '#embed', '/docs', '/mcp.json', '/faq'):
+        assert f'href="{href}"' in r.text, f"missing persona chip: {href}"
