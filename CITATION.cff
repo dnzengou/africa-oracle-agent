@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Africa Oracle Extraction Agent"
+abstract: >
+  Resilient mobile-money price oracle for African currencies. Aggregates real-time
+  FX feeds from M-Pesa, Airtel Money, Orange Money, and MTN MoMo across ~30 countries
+  into a quorum-protected, outlier-filtered median rate. Phase 0 of the AFRI Jetton
+  stablecoin on TON (TIP-74).
+authors:
+  - family-names: "Nzengou"
+    given-names: "Desire"
+    email: "desire.yavro@gmail.com"
+repository-code: "https://github.com/nzengou/africa-oracle-agent"
+url: "https://africa-oracle.fly.dev/"
+version: "0.7.0"
+date-released: "2026-11-08"
+license: "LicenseRef-TBD"
+keywords:
+  - Africa
+  - mobile-money
+  - stablecoin
+  - oracle
+  - TON
+  - M-Pesa
+  - Airtel-Money
+  - MTN-MoMo
+  - Orange-Money
+  - foreign-exchange
+  - jetton
+  - TIP-74
+preferred-citation:
+  type: software
+  title: "Africa Oracle Extraction Agent"
+  authors:
+    - family-names: "Nzengou"
+      given-names: "Desire"
+  version: "0.7.0"
+  year: 2026
+  url: "https://github.com/nzengou/africa-oracle-agent"

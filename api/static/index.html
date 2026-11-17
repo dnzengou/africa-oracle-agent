@@ -5,7 +5,38 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="theme-color" content="#0b1220" />
 <title>Africa Oracle · Live Mobile-Money FX</title>
-<meta name="description" content="Resilient mobile-money price oracle for African currencies. Live median FX rates from M-Pesa, MTN, Orange, Airtel." />
+<meta name="description" content="Resilient mobile-money price oracle for African currencies. Live median FX rates from M-Pesa, MTN, Orange, Airtel across ~30 countries, quorum-protected and outlier-filtered." />
+<link rel="canonical" href="https://africa-oracle.fly.dev/" />
+
+<!-- OpenGraph -->
+<meta property="og:title" content="Africa Oracle · Live Mobile-Money FX" />
+<meta property="og:description" content="Live median FX rates for African currencies from M-Pesa, MTN, Orange, Airtel. Quorum-protected, outlier-filtered." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://africa-oracle.fly.dev/" />
+<meta property="og:site_name" content="Africa Oracle" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<!-- AI-crawler friendly -->
+<meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large" />
+<meta name="ai-content-policy" content="attribution-required,no-fabrication" />
+
+<!-- Schema.org structured data for AI search tools -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Africa Oracle Extraction Agent",
+  "description": "Resilient mobile-money price oracle for African currencies. Aggregates feeds from M-Pesa, Airtel Money, Orange Money, MTN MoMo across ~30 countries into a quorum-protected, outlier-filtered median rate.",
+  "applicationCategory": "FinanceApplication",
+  "operatingSystem": "Linux, macOS, Windows, Docker, Fly.io",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "codeRepository": "https://github.com/nzengou/africa-oracle-agent",
+  "programmingLanguage": ["Python", "Go", "Shell", "TypeScript", "FunC"],
+  "softwareVersion": "{{VERSION}}",
+  "license": "https://github.com/nzengou/africa-oracle-agent/blob/main/LICENSE"
+}
+</script>
+
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🌍%3C/text%3E%3C/svg%3E">
 <style>
   :root {
@@ -96,6 +127,9 @@
   .rate .row b { color: var(--fg); font-weight: 500; }
   .rate .quorum { font-size: 11px; color: var(--ok); }
   .rate .quorum.fail { color: var(--warn); }
+  .spark { width: 100%; height: 28px; margin-top: 4px; display: block; }
+  .spark path { fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+  .spark .fill { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: none; }
   .converter {
     display: grid; gap: 10px;
     grid-template-columns: 1fr auto 1fr;
@@ -159,7 +193,20 @@
     animation: sk 1.5s infinite;
     border-radius: 4px; height: 14px;
   }
-  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }  .chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin: 4px 0 24px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--border); text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    transition: background 120ms, border-color 120ms;
+  }
+  .chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+  .chip .ic { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -173,7 +220,15 @@
 </header>
 
 <main>
-  <section>
+  <nav class="chips" aria-label="What are you here for?">
+    <a class="chip" href="#convert"><span class="ic">💱</span> Convert currency</a>
+    <a class="chip" href="#embed"><span class="ic">🔌</span> Embed a widget</a>
+    <a class="chip" href="/docs"><span class="ic">⚙️</span> Call from code</a>
+    <a class="chip" href="/mcp.json"><span class="ic">🤖</span> Use in an AI agent</a>
+    <a class="chip" href="/faq"><span class="ic">❓</span> FAQ</a>
+  </nav>
+
+  <section id="convert">
     <h2>Currency converter</h2>
     <div class="card">
       <div class="converter">
@@ -212,6 +267,18 @@
       <div class="rate"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div></div>
     </div>
   </section>
+
+  <section id="embed">
+    <h2>Embed anywhere <span style="font-family:var(--mono);font-size:11px;text-transform:none;color:var(--muted);">— one line of JS</span></h2>
+    <div class="card">
+      <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">Drop this into any HTML page to show a live rate. Attributes <code style="font-family:var(--mono)">data-from</code>, <code style="font-family:var(--mono)">data-to</code>, <code style="font-family:var(--mono)">data-amount</code>, <code style="font-family:var(--mono)">data-theme</code> are optional.</p>
+      <pre id="embed" style="margin:0;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:auto;font:12px var(--mono);"></pre>
+      <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="color:var(--muted);font-size:12px;">Live preview:</span>
+        <script id="embedDemo"></script>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer>
@@ -220,6 +287,11 @@
     <a href="/rates">rates API</a> ·
     <a href="/evo/genome">genome</a> ·
     <a href="/metrics">metrics</a>
+    <a href="/faq">FAQ</a> ·
+    <a href="/metrics">metrics</a> ·
+    <a href="/feeds/stream">SSE</a> ·
+    <a href="/feed.xml">RSS</a> ·
+    <a href="/mcp.json">MCP</a>
   </div>
   <div><span id="evo">warming up…</span></div>
   <div>Phase 0 · <span id="providers">…</span> providers · <a href="https://github.com/dnzengou/africa-oracle-agent" rel="noopener">source</a></div>
@@ -277,7 +349,7 @@
     const rows = feed.prices.map(p => {
       const distinct = p.distinct_providers || (new Set(p.providers)).size;
       const q = distinct >= 2;
-      return `<div class="rate">
+      return `<div class="rate" data-ccy="${p.currency}">
         <div class="ccy">
           <span class="code">${p.currency}</span>
           <span class="agents">${p.agent_count} agents · ${p.countries.join(",")}</span>
@@ -288,19 +360,45 @@
           <span>sell <b>${fmt(p.sell_price, 4)}</b></span>
           <span>spread <b>${fmt(p.spread_bps, 1)}bps</b></span>
         </div>
+        <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div class="quorum ${q ? "" : "fail"}">${q ? "✓" : "⚠"} ${distinct} providers · ${fmt(p.avg_confidence * 100, 1)}% confidence</div>
       </div>`;
     });
     $("rates").innerHTML = rows.join("") || `<div class="err">No rates passed quorum.</div>`;
+    // Fill sparklines async; errors (e.g. empty ring) leave them blank.
+    feed.prices.forEach(p => fetchSpark(p.currency));
+  }
+
+  async function fetchSpark(ccy) {
+    try {
+      const r = await API(`/history/USD/${ccy}?since=1800`);
+      const svg = document.querySelector(`.rate[data-ccy="${ccy}"] .spark`);
+      if (!svg || !r.series || r.series.length < 2) return;
+      const pts = r.series.map(x => x.rate);
+      const min = Math.min(...pts), max = Math.max(...pts);
+      const span = max - min || 1;
+      const n = pts.length - 1;
+      const coords = pts.map((v, i) => {
+        const x = (i / n) * 100;
+        const y = 26 - ((v - min) / span) * 24;
+        return [x, y];
+      });
+      const d = coords.map((c, i) => (i === 0 ? "M" : "L") + c[0].toFixed(2) + "," + c[1].toFixed(2)).join(" ");
+      const fill = d + ` L100,28 L0,28 Z`;
+      svg.innerHTML = `<path class="fill" d="${fill}"/><path d="${d}"/>`;
+    } catch (_) { /* no history yet, leave blank */ }
   }
 
   function populateSelects() {
-    const opts = state.ccys.map(c => `<option value="${c}">${c}</option>`).join("");
-    const from = $("fromCcy"), to = $("toCcy");
-    const prevF = from.value, prevT = to.value;
+    // USD is always available (base currency, synthetic rate 1.0).
+    var ccys = state.ccys.slice();
+    if (!ccys.includes("USD")) ccys = ["USD"].concat(ccys);
+    var opts = ccys.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join("");
+    var from = $("fromCcy"), to = $("toCcy");
+    var prevF = from.value, prevT = to.value;
     from.innerHTML = opts; to.innerHTML = opts;
-    from.value = prevF && state.ccys.includes(prevF) ? prevF : (state.ccys.includes("KES") ? "KES" : state.ccys[0]);
-    to.value = prevT && state.ccys.includes(prevT) ? prevT : (state.ccys.includes("NGN") ? "NGN" : state.ccys[1] || state.ccys[0]);
+    from.value = prevF && ccys.includes(prevF) ? prevF : "USD";
+    to.value = prevT && ccys.includes(prevT) ? prevT : (ccys.includes("KES") ? "KES" : ccys[1] || ccys[0]);
   }
 
   // Convert locally from the loaded feed — instant, works offline between
@@ -345,6 +443,23 @@
   loadHealth();
   loadFeed();
   setInterval(loadFeed, 15000);
+
+  // Embed snippet — origin is wherever the dashboard is served from
+  (function(){
+    var origin = location.origin;
+    var snip = '<script src="' + origin + '/widget.js"\n'
+      + '        data-from="KES" data-to="NGN" data-amount="100"><\/script>';
+    var pre = document.getElementById('embed');
+    if (pre) pre.textContent = snip;
+    // Live demo: inject the widget script right after the placeholder
+    var demo = document.getElementById('embedDemo');
+    if (demo) {
+      var s = document.createElement('script');
+      s.src = origin + '/widget.js';
+      s.dataset.from = 'KES'; s.dataset.to = 'NGN'; s.dataset.amount = '100';
+      demo.parentNode.insertBefore(s, demo.nextSibling);
+    }
+  })();
 </script>
 </body>
 </html>

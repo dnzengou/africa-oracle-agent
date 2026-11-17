@@ -1,0 +1,7 @@
+# Security Contact Information per RFC 9116
+Contact: https://github.com/nzengou/africa-oracle-agent/security/advisories/new
+Contact: https://github.com/nzengou/africa-oracle-agent/issues
+Expires: 2027-12-31T23:59:59Z
+Preferred-Languages: en, fr
+Canonical: https://africa-oracle.fly.dev/.well-known/security.txt
+Policy: https://github.com/nzengou/africa-oracle-agent/blob/main/SECURITY.md

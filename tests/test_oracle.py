@@ -361,7 +361,8 @@ def test_api_convert_rejects_unknown_currency():
     from api.app import app
 
     client = TestClient(app)
-    r = client.post("/convert", json={"from": "USD", "to": "KES", "amount": 100})
+    # ZZZ is not a real ISO 4217 code and not in the feed; USD is now supported
+    r = client.post("/convert", json={"from": "ZZZ", "to": "KES", "amount": 100})
     assert r.status_code == 400
 
 
@@ -390,3 +391,509 @@ def test_api_cors_headers_present():
     )
     assert r.status_code == 200
     assert r.headers.get("access-control-allow-origin") == "*"
+
+
+# ─── GET /rate/{from}/{to} (cite-friendly endpoint) ──────────────────────────
+
+
+def test_api_rate_simple_get():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/KES/NGN")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "KES"
+    assert body["to"] == "NGN"
+    assert body["rate"] > 0
+    assert 0 < body["confidence"] <= 1
+    assert isinstance(body["providers"], list)
+
+
+def test_api_rate_404_on_unknown_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    # ZZZ is not a real ISO 4217 code and not in the feed
+    r = client.get("/rate/ZZZ/KES")
+    assert r.status_code == 404
+
+
+def test_api_rate_lowercase_currency_still_works():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/kes/ngn")
+    assert r.status_code == 200
+    assert r.json()["from"] == "KES"
+
+
+# ─── /widget.js embeddable widget ────────────────────────────────────────────
+
+
+def test_api_widget_js_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/widget.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript")
+    # The widget must reference the /convert endpoint and self-mount
+    assert "/convert" in r.text
+    assert "document.createElement" in r.text
+    # Cache-Control present so CDNs can serve it
+    assert "max-age" in r.headers.get("cache-control", "")
+
+
+# ─── AI-discoverability (GEO pass) ───────────────────────────────────────────
+
+
+def test_api_llms_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/llms.txt")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "Africa Oracle" in r.text
+
+
+def test_api_ai_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/ai.txt")
+    assert r.status_code == 200
+    assert "User-agent" in r.text
+
+
+def test_api_ai_plugin_json_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/ai-plugin.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema_version"] == "v1"
+    assert body["name_for_model"] == "africa_oracle"
+    assert body["api"]["type"] == "openapi"
+
+
+def test_api_security_txt_served():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/security.txt")
+    assert r.status_code == 200
+    assert "Contact:" in r.text
+
+
+def test_api_dashboard_has_jsonld_and_og():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    # OpenGraph for AI search tools + social embeds
+    assert 'property="og:title"' in r.text
+    # Schema.org structured data for LLM citers
+    assert 'application/ld+json' in r.text
+    assert '"@type": "SoftwareApplication"' in r.text
+    # AI-friendly robots directive
+    assert 'name="robots"' in r.text
+
+
+def test_api_openapi_schema_published():
+    """OpenAPI schema is what the /.well-known/ai-plugin.json points to;
+    without it ChatGPT / Claude can't discover the tools."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    schema = r.json()
+    assert schema["info"]["title"] == "Africa Oracle Extraction Agent"
+    # All public endpoints advertised
+    paths = schema["paths"]
+    for p in ("/health", "/convert", "/rate/{from_ccy}/{to_ccy}", "/widget.js"):
+        assert p in paths, f"missing path in OpenAPI: {p}"
+
+
+# ─── USD as synthetic base (fixes merchant/remittance examples) ──────────────
+
+
+def test_convert_usd_to_kes_works():
+    """USD must work even though it isn't in REFERENCE_RATES — the aggregator
+    feed is USD-quoted by construction, so USD is a synthetic base at 1.0."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/convert", json={"from": "USD", "to": "KES", "amount": 100})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"]["currency"] == "USD"
+    assert body["to"]["currency"] == "KES"
+    # KES is around 150/USD, so 100 USD → ~15,000 KES. Allow wide band for simulator noise.
+    assert 10_000 < body["to"]["amount"] < 20_000
+
+
+def test_rate_usd_to_any_works():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/rate/USD/NGN")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "USD"
+    assert body["to"] == "NGN"
+    assert body["rate"] > 0
+
+
+def test_convert_amount_usd_identity():
+    from oracle_agent import convert_amount
+
+    # USD → USD must be exactly identity, even with an empty feed
+    out = convert_amount({"prices": []}, "USD", "USD", 42.0)
+    assert out["to"]["amount"] == 42.0
+    assert out["rate"] == 1.0
+
+
+# ─── Classic + agentic SEO surfaces ──────────────────────────────────────────
+
+
+def test_api_robots_txt():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/robots.txt")
+    assert r.status_code == 200
+    # Explicit AI-bot allows
+    for bot in ("GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"):
+        assert bot in r.text, f"missing {bot} in robots.txt"
+    assert "Sitemap:" in r.text
+
+
+def test_api_sitemap_xml():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/sitemap.xml")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/xml")
+    assert "<urlset" in r.text
+    assert "<loc>" in r.text
+
+
+def test_api_feed_xml():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/feed.xml")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/rss+xml")
+    assert "<rss" in r.text and "</rss>" in r.text
+    assert "<item>" in r.text  # at least one rate item
+
+
+def test_api_faq_page_has_jsonld_faqpage():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/faq")
+    assert r.status_code == 200
+    # Schema.org FAQPage is the whole point
+    assert '"@type": "FAQPage"' in r.text
+    assert '"@type": "Question"' in r.text
+    # Canonical URL + robots directive
+    assert 'rel="canonical"' in r.text
+
+
+def test_api_agents_json_discovery():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/.well-known/agents.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "africa-oracle"
+    assert "capabilities" in body and len(body["capabilities"]) >= 3
+    assert body["endpoints"]["mcp"].endswith("/mcp.json")
+
+
+def test_api_mcp_json_tool_catalog():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/mcp.json")
+    assert r.status_code == 200
+    body = r.json()
+    tool_names = {t["name"] for t in body["tools"]}
+    assert {"convert_currency", "get_rate", "list_providers"} <= tool_names
+    # convert_currency must declare its JSON schema for the MCP client
+    convert = next(t for t in body["tools"] if t["name"] == "convert_currency")
+    assert "input_schema" in convert
+
+
+def test_dashboard_version_is_templated():
+    """Catches version drift — the dashboard must show the running VERSION,
+    not a stale hardcoded string from a previous release."""
+    from fastapi.testclient import TestClient
+    from api.app import app, VERSION
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    # The templated version token must be gone and the real version present
+    assert "{{VERSION}}" not in r.text
+    assert f'"softwareVersion": "{VERSION}"' in r.text
+
+
+def test_dashboard_has_persona_chips():
+    """Onboarding chips must be present and lead to the right anchors."""
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/")
+    for href in ('#convert', '#embed', '/docs', '/mcp.json', '/faq'):
+        assert f'href="{href}"' in r.text, f"missing persona chip: {href}"
+
+
+# ─── History ring buffer + /history endpoint ─────────────────────────────────
+
+
+def test_api_history_warms_and_returns_series():
+    from fastapi.testclient import TestClient
+    from api.app import app, _history, _snapshots, _cache
+
+    _history.clear()
+    _snapshots.clear()
+    _cache.clear()
+    client = TestClient(app)
+    r = client.get("/history/USD/KES?since=1800")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "USD"
+    assert body["to"] == "KES"
+    # Warm path populated the ring with at least one snapshot
+    assert body["points"] >= 1
+    for pt in body["series"]:
+        assert "t" in pt and "rate" in pt and "oracle_id" in pt
+        assert pt["rate"] > 0
+
+
+def test_api_history_rejects_out_of_range():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    # since must be >= 60 and <= HISTORY_WINDOW_S (3600)
+    assert client.get("/history/USD/KES?since=10").status_code == 422
+    assert client.get("/history/USD/KES?since=99999").status_code == 422
+
+
+# ─── Snapshot — content-addressable feeds ────────────────────────────────────
+
+
+def test_api_snapshot_hits_after_feed():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    feed = client.post("/feeds/robust", json={"min_providers": 1, "tukey_k": 1.5}).json()
+    oid = feed["oracle_id"]
+    r = client.get(f"/snapshot/{oid}")
+    assert r.status_code == 200
+    assert r.json()["oracle_id"] == oid
+
+
+def test_api_snapshot_404_for_unknown_id():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/snapshot/0000000000000000")
+    assert r.status_code == 404
+
+
+# ─── Real MCP server at POST /mcp ────────────────────────────────────────────
+
+
+def test_mcp_initialize():
+    from fastapi.testclient import TestClient
+    from api.app import app, VERSION
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {},
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == 1
+    assert body["result"]["serverInfo"]["name"] == "africa-oracle"
+    assert body["result"]["serverInfo"]["version"] == VERSION
+    assert "protocolVersion" in body["result"]
+
+
+def test_mcp_tools_list():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": "tl", "method": "tools/list",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    tools = {t["name"] for t in body["result"]["tools"]}
+    assert {"convert_currency", "get_rate", "list_providers", "robust_feed"} <= tools
+
+
+def test_mcp_tools_call_convert_currency():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": "c1", "method": "tools/call",
+        "params": {
+            "name": "convert_currency",
+            "arguments": {"from_currency": "USD", "to_currency": "KES", "amount": 100},
+        },
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result"]["isError"] is False
+    text = body["result"]["content"][0]["text"]
+    import json as _json
+    payload = _json.loads(text)
+    assert payload["from"]["currency"] == "USD"
+    assert payload["to"]["currency"] == "KES"
+    assert payload["to"]["amount"] > 0
+
+
+def test_mcp_tools_call_get_rate():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "get_rate",
+                   "arguments": {"from_currency": "USD", "to_currency": "NGN"}},
+    })
+    body = r.json()
+    import json as _json
+    payload = _json.loads(body["result"]["content"][0]["text"])
+    assert payload["rate"] > 0
+
+
+def test_mcp_unknown_method_error():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 9, "method": "no/such/method",
+    })
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == -32601
+
+
+def test_mcp_tools_call_unknown_tool_error():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": "delete_everything", "arguments": {}},
+    })
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == -32602
+
+
+# ─── /changelog + p95 metrics ────────────────────────────────────────────────
+
+
+def test_api_changelog_article_jsonld():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/changelog")
+    assert r.status_code == 200
+    assert '"@type": "Article"' in r.text
+    assert "Africa Oracle" in r.text
+
+
+def test_metrics_includes_latency_quantiles_after_traffic():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    # Generate at least one aggregator computation
+    client.post("/feeds/robust", json={"min_providers": 1, "tukey_k": 1.5})
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "africa_oracle_aggregator_p50_seconds" in r.text
+    assert "africa_oracle_aggregator_p95_seconds" in r.text
+
+
+def test_metrics_includes_ring_buffer_gauges():
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    client = TestClient(app)
+    r = client.get("/metrics")
+    assert "africa_oracle_history_size" in r.text
+    assert "africa_oracle_snapshot_index_size" in r.text
+
+
+# ─── Trim verification: static assets served from disk ───────────────────────
+
+
+def test_widget_js_served_from_static_file():
+    """Widget content lives in api/static/widget.js, not an inline string."""
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    from api.app import app
+
+    p = Path(__file__).resolve().parent.parent / "api" / "static" / "widget.js"
+    assert p.exists(), "widget.js must be a static file for CDN caching"
+    client = TestClient(app)
+    r = client.get("/widget.js")
+    # Byte-for-byte match with disk, modulo encoding (static file is canonical source)
+    assert r.text.strip() == p.read_text(encoding="utf-8").strip()
+
+
+def test_faq_content_sourced_from_json_asset():
+    """FAQ data lives in api/static/faq.json, not a Python literal."""
+    from pathlib import Path
+    import json as _json
+    p = Path(__file__).resolve().parent.parent / "api" / "static" / "faq.json"
+    assert p.exists(), "faq.json must be editable without touching Python"
+    data = _json.loads(p.read_text(encoding="utf-8"))
+    # Pairs of (question, answer)
+    assert all(isinstance(pair, list) and len(pair) == 2 for pair in data)
+    assert len(data) >= 10
