@@ -31,7 +31,14 @@
 | SSE streaming at `/feeds/stream` | `_sse_loop` in [`api/app.py`](api/app.py) |
 | Prometheus text metrics at `/metrics` | `metrics()` route in [`api/app.py`](api/app.py) |
 | Cite-friendly `GET /rate/{from}/{to}` | `rate()` route in [`api/app.py`](api/app.py) |
-| Embeddable widget at `/widget.js` | `_WIDGET_JS` in [`api/app.py`](api/app.py) |
+| Embeddable widget at `/widget.js` | `widget_js()` route + [`api/static/widget.js`](api/static/widget.js) |
+| In-memory history ring (60 min) | `_history` deque + `_record_snapshot` in [`api/app.py`](api/app.py) |
+| `GET /history/{from}/{to}` time series | `history()` route in [`api/app.py`](api/app.py) |
+| `GET /snapshot/{oracle_id}` content-addressable feeds | `_snapshots` dict + `snapshot()` route in [`api/app.py`](api/app.py) |
+| Real MCP server at `POST /mcp` (JSON-RPC 2.0) | `mcp_endpoint()` + `_mcp_call_tool()` + `_MCP_TOOLS` in [`api/app.py`](api/app.py) |
+| `GET /changelog` with Article JSON-LD | `changelog()` + `_markdown_to_html()` in [`api/app.py`](api/app.py) |
+| p50/p95 latency on `/metrics` | `_latencies` + `_quantile()` in [`api/app.py`](api/app.py) |
+| FAQ content in `api/static/faq.json` | `_load_faq()` in [`api/app.py`](api/app.py), [`api/static/faq.json`](api/static/faq.json) |
 
 ## Claims about deployment
 
@@ -74,4 +81,4 @@
 - For a number (e.g. "60 req/min rate limit"), cite the constant in code (`RATE_LIMIT_PER_MIN`).
 - Do **not** invent user counts, deployment regions, pricing, or partnerships. The repository is the single source of truth.
 
-Last updated against: v0.7.0.
+Last updated against: v0.9.0.

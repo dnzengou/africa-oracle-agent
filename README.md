@@ -3,7 +3,7 @@
 > **A resilient, sovereign, scalable, affordable alternative to foreign fiat-backed stablecoins.**
 > Phase 0 of the AFRI Jetton (TIP-74 on TON) — mobile-money-native price oracle for ~30 African countries.
 
-[![tests](https://img.shields.io/badge/tests-65%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.8.0-black)]() [![agentic-seo](https://img.shields.io/badge/agentic--SEO-mcp.json%20%C2%B7%20agents.json%20%C2%B7%20FAQPage-blueviolet)]()
+[![tests](https://img.shields.io/badge/tests-80%20passing-brightgreen)]() [![arch](https://img.shields.io/badge/arch-amd64%20%2B%20arm64-blue)]() [![deploy](https://img.shields.io/badge/deploy-Fly.io%20%C2%B7%20GHCR%20%C2%B7%20Vercel%20%C2%B7%20self--host-orange)]() [![sdk](https://img.shields.io/badge/SDK-py%20%C2%B7%20ts%20%C2%B7%20ext%20%C2%B7%20pwa%20%C2%B7%20vscode-7e57c2)]() [![version](https://img.shields.io/badge/version-0.9.0-black)]() [![mcp](https://img.shields.io/badge/MCP-JSON--RPC%20server-brightgreen)]()
 
 ## What it does
 
@@ -84,28 +84,28 @@ curl -fsSL https://raw.githubusercontent.com/nzengou/africa-oracle-agent/main/sd
 
 Build all artifacts at once: `bash sdk/build.sh` → `dist/`.
 
-## API endpoints (v0.8.0)
+## API endpoints (v0.9.0)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | dashboard — persona chips + converter + live rates + embed snippet |
-| `GET` | `/faq` | human + `FAQPage` JSON-LD (AI extraction surface) |
-| `GET` | `/health` | – |
-| `GET` | `/providers` | – |
-| `POST` | `/hunt` | single-feed probe |
-| `POST` | `/feeds/all` · `/feeds/quorum` · `/feeds/robust` | aggregation (cached 10 s) |
-| `POST` | `/convert` `{from, to, amount, side}` | **USD supported as base** |
-| `GET` | `/rate/{from}/{to}` | simple GET rate (cite-friendly) |
+| `GET` | `/` | dashboard — persona chips, converter, rate grid with sparklines |
+| `GET` | `/faq` · `/changelog` | FAQPage · Article JSON-LD (AI extraction surfaces) |
+| `GET` | `/health` · `/providers` · `/metrics` | basics + p50/p95 |
+| `POST` | `/hunt` · `/feeds/all` · `/feeds/quorum` · `/feeds/robust` | aggregation (cached 10 s) |
+| `POST` | `/convert` `{from, to, amount, side}` | USD supported as base |
+| `GET` | `/rate/{from}/{to}` | simple GET rate |
+| `GET` | `/history/{from}/{to}?since=N` | **new** — ring-buffer time series (last 60 min) |
+| `GET` | `/snapshot/{oracle_id}` | **new** — content-addressable frozen feed (cite-and-verify) |
+| `POST` | `/mcp` | **new** — real MCP JSON-RPC server (Claude Desktop, Cursor) |
 | `GET` | `/widget.js` | one-line embeddable widget |
 | `GET` | `/feeds/stream` | SSE |
-| `GET` | `/metrics` | Prometheus text |
-| `GET` | `/openapi.json` · `/docs` · `/redoc` | API schema (free via FastAPI) |
+| `GET` | `/openapi.json` · `/docs` · `/redoc` | API schema |
 | `GET` | `/robots.txt` · `/sitemap.xml` · `/feed.xml` | classic + RSS SEO |
 | `GET` | `/llms.txt` · `/ai.txt` | LLM-crawler guide + policy |
-| `GET` | `/mcp.json` | MCP tool catalog (Claude Desktop, Cursor) |
-| `GET` | `/.well-known/ai-plugin.json` · `/.well-known/agents.json` · `/.well-known/security.txt` | agent + plugin discovery + RFC 9116 |
+| `GET` | `/mcp.json` | MCP tool catalog (static descriptor) |
+| `GET` | `/.well-known/ai-plugin.json` · `/.well-known/agents.json` · `/.well-known/security.txt` | plugin + agent discovery + RFC 9116 |
 
-Production hardening v0.8.0: USD as base currency (fixes merchant/remittance examples). Dashboard version templated server-side (no more drift). Persona onboarding chips on the dashboard. `/faq` with `FAQPage` structured data.
+Production hardening v0.9.0: in-memory history ring (60 min, 120 entries). Snapshot index (~240 oracle_ids, ~2 h retention). Real MCP streamable-http server. p50/p95 latency on `/metrics`. Widget.js and FAQ content extracted to `api/static/` for faster iteration and CDN caching.
 
 ## Deploy targets
 
