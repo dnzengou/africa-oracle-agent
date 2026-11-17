@@ -284,13 +284,17 @@
 <footer>
   <div>
     <a href="/docs">API docs</a> ·
+    <a href="/rates">rates API</a> ·
+    <a href="/evo/genome">genome</a> ·
+    <a href="/metrics">metrics</a>
     <a href="/faq">FAQ</a> ·
     <a href="/metrics">metrics</a> ·
     <a href="/feeds/stream">SSE</a> ·
     <a href="/feed.xml">RSS</a> ·
     <a href="/mcp.json">MCP</a>
   </div>
-  <div>Phase 0 · <span id="providers">…</span> providers · <a href="https://github.com/nzengou/africa-oracle-agent" rel="noopener">source</a></div>
+  <div><span id="evo">warming up…</span></div>
+  <div>Phase 0 · <span id="providers">…</span> providers · <a href="https://github.com/dnzengou/africa-oracle-agent" rel="noopener">source</a></div>
 </footer>
 
 <script>
@@ -323,7 +327,7 @@
 
   async function loadFeed() {
     try {
-      const feed = await API("/feeds/robust", {
+      const feed = await API("/feeds/evolved", {
         method: "POST",
         body: JSON.stringify({min_providers: 2, tukey_k: 1.5})
       });
@@ -332,6 +336,10 @@
       renderRates(feed);
       populateSelects();
       compute();
+      if (feed.evo) {
+        $("evo").textContent = `${feed.evo.trajectories_total.toLocaleString()} trajectories learned · ${feed.evo.sources} sources` +
+          (feed.evo.quarantined.length ? ` · ${feed.evo.quarantined.length} quarantined` : "");
+      }
     } catch (e) {
       $("rates").innerHTML = `<div class="err">Failed to load rates: ${e.message}</div>`;
     }
@@ -393,12 +401,10 @@
     to.value = prevT && ccys.includes(prevT) ? prevT : (ccys.includes("KES") ? "KES" : ccys[1] || ccys[0]);
   }
 
-  let debounce;
+  // Convert locally from the loaded feed — instant, works offline between
+  // polls, and never burns the API rate limit on keystrokes. Mirrors the
+  // server-side "mid" leg of /convert (ccy/USD quotes: divide then multiply).
   function compute() {
-    clearTimeout(debounce);
-    debounce = setTimeout(_compute, 150);
-  }
-  async function _compute() {
     const amount = parseFloat($("amount").value);
     const from = $("fromCcy").value, to = $("toCcy").value;
     if (!amount || !from || !to || from === to) {
@@ -409,19 +415,21 @@
       $("convErr").textContent = "";
       return;
     }
-    try {
-      const r = await API("/convert", {
-        method: "POST",
-        body: JSON.stringify({from, to, amount, side: "mid"})
-      });
-      $("result").value = fmt(r.to.amount, 4);
-      $("resultBig").textContent = fmt(r.to.amount, 2) + " " + r.to.currency;
-      $("resultDetails").textContent = `${fmt(amount, 2)} ${from} · confidence ${fmt(r.confidence * 100, 0)}% · spread ${fmt(r.spread_bps, 1)}bps`;
-      $("resultRate").textContent = `1 ${from} = ${fmt(r.rate, 6)} ${to}`;
-      $("convErr").textContent = "";
-    } catch (e) {
-      $("convErr").textContent = e.message;
+    const prices = Object.fromEntries((state.feed?.prices || []).map(p => [p.currency, p]));
+    const src = prices[from], dst = prices[to];
+    if (!src || !dst) {
+      $("convErr").textContent = "Rates still loading…";
+      return;
     }
+    const toAmount = (amount / src.mid_price) * dst.mid_price;
+    const rate = dst.mid_price / src.mid_price;
+    const confidence = Math.min(src.avg_confidence, dst.avg_confidence);
+    const spreadBps = (src.spread + dst.spread) * 10000;
+    $("result").value = fmt(toAmount, 4);
+    $("resultBig").textContent = fmt(toAmount, 2) + " " + to;
+    $("resultDetails").textContent = `${fmt(amount, 2)} ${from} · confidence ${fmt(confidence * 100, 0)}% · spread ${fmt(spreadBps, 1)}bps`;
+    $("resultRate").textContent = `1 ${from} = ${fmt(rate, 6)} ${to}`;
+    $("convErr").textContent = "";
   }
 
   $("amount").addEventListener("input", compute);

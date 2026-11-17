@@ -1,5 +1,5 @@
 # AFRI Africa Oracle — Project Blueprint
-**Version:** 0.5.0 · **Date:** 2026-06-25 · **Deploy:** [pending]
+**Version:** 0.7.0 · **Date:** 2026-07-11 · **Deploy:** GHCR auto (`ghcr.io/dnzengou/africa-oracle-agent:latest`) · Fly.io/Vercel [pending first launch]
 
 ## Value proposition
 
@@ -12,6 +12,7 @@
 | **Scalable** | Edge + cloud, push + poll, multi-region | async `/feeds/all` · SSE `/feeds/stream` · multi-arch image · stateless API |
 | **Affordable** | Free-tier viable, $35-hardware edge | shared-cpu-1x Fly.io · POSIX shell port on Raspberry Pi · no Redis/Postgres |
 | **Alternative** | Better than USDT/USDC on African settlement | mobile-money-native collateral · TON $0.005 gas · Telegram via TON Connect · on-chain ratio |
+| **Evolving** *(moat)* | Oracle quality compounds with operating history — a competitor can copy the registry, not the accumulated trajectory log or the genome distilled from it | `evo_oracle.py` fitness genome · `/feeds/evolved` · `/evo/genome` · `trajectories.jsonl` |
 
 Detailed comparison vs USDT/USDC: see `SOVEREIGNTY.md`.
 
@@ -64,6 +65,9 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 - [x] **`SOVEREIGNTY.md`** with AFRI vs USDT/USDC comparison — Alternative pillar
 - [x] **5-channel SDK distribution** (Python pip · npm TS · MV3 ext · PWA · VSCode · POSIX one-liner) — Affordable + Alternative
 - [x] **Outlier detection** (Tukey-fence on mid_price, `robust_quorum_aggregate`) — Resilient pillar (v0.5.0)
+- [x] **Production dashboard** (`/` converter + live rates) + **`/convert`** remittance endpoint + CORS + TTL cache + per-IP rate limit (v0.6.0)
+- [x] **EvoOracle flywheel** (`evo_oracle.py`: trajectory capture → integer-bps fitness genome → weighted consensus → quarantine) — Evolving pillar / moat (v0.7.0)
+- [x] **`GET /rates`** one-GET integration surface (compact map + inline conversion) — Adoption (v0.7.0)
 - [ ] Real API integration (requires provider keys)
 - [ ] African-mirror image registry (post-GHCR sovereignty)
 
@@ -92,14 +96,17 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 | `CLAUDE.md` | AI-assistant context | ✅ |
 | `AFRI_Blueprint.md` | This file | ✅ |
 | `SOVEREIGNTY.md` | 5-pillar value prop + USDT/USDC comparison | ✅ |
-| `EVAL_REPORT.md` | Audit + R²S² gate scores | ✅ |
 | `DEPLOY.md` | Fly.io / GHCR / Vercel / self-host paths | ✅ |
 | `docker-compose.yml` | Self-host on any African VPS | ✅ |
 | `skills/africa-oracle-devflow.md` | Distilled project DevFlow skill | ✅ |
 | `oracle_agent.py` | Python oracle agent + aggregator | ✅ |
+| `evo_oracle.py` | EvoOracle flywheel: trajectory log + fitness genome + weighted consensus | ✅ |
 | `oracle_agent.go` | Go port | ✅ |
 | `oracle_agent.sh` | POSIX shell port | ✅ |
 | `api/app.py` | FastAPI ASGI server | ✅ |
+| `api/static/index.html` | Dashboard: converter + live rates + flywheel stats (self-contained SPA) | ✅ |
+| `tests/test_evo.py` | EvoOracle unit + API tests (19) | ✅ |
+| `requirements-dev.txt` | Test-only deps (pytest, httpx) — kept out of the production image | ✅ |
 | `afri-bridge.sh` | Mobile money ↔ AFRI bridge | ✅ |
 | `afri-deploy.sh` | TON deploy harness | ✅ |
 | `afri-token.fc` | TON Jetton smart contract (TIP-74, compiles to BoC) | ✅ |
@@ -142,20 +149,79 @@ Africa Oracle Agent extracts real-time price feeds from mobile money aggregator 
 
 | Method | Path | Body / Query | Response | Pillar |
 |---|---|---|---|---|
-| GET | `/health` | – | `{"status":"ok","version":"0.3.0","providers":4,"uptime_s":N}` | – |
+| GET | `/` | – | dashboard SPA (converter + live rates + flywheel stats) | Adoption (v0.6.0) |
+| GET | `/health` | – | `{"status":"ok","version":"0.7.0","providers":4,"uptime_s":N}` | – |
 | GET | `/providers` | – | provider/country/currency map | – |
+| GET | `/rates` | `?from=KES&to=NGN&amount=1000` (all optional) | compact `{ccy: {mid,buy,sell,confidence}}` map, + `conversion` when queried | Adoption (v0.7.0) |
 | POST | `/hunt` | `{"provider","country","simulate"}` | `PriceFeed` | – |
-| POST | `/feeds/all` | `{}` | `OracleReport` (aggregated, async) | Scalable |
+| POST | `/feeds/all` | `{}` | `OracleReport` (aggregated, async, 10 s TTL cache) | Scalable |
 | POST | `/feeds/quorum` | `{"min_providers":2}` | `OracleReport` + `quorum_failed[]` | **Resilient** |
 | POST | `/feeds/robust` | `{"min_providers":2,"tukey_k":1.5}` | quorum + Tukey-fence on mid_price; lists `outliers_dropped[]` | **Resilient** (v0.5.0) |
+| POST | `/feeds/evolved` | `{"min_providers":2,"tukey_k":1.5}` | robust + fitness-weighted consensus + `evo` block | **Evolving** (v0.7.0) |
+| POST | `/convert` | `{"from","to","amount","side"}` | converted amount + rate + confidence + per-leg providers | Alternative (v0.6.0) |
+| GET | `/evo/genome` | – | per-source fitness genome + trajectory count (the moat, inspectable) | **Evolving** (v0.7.0) |
 | GET | `/feeds/stream` | `?interval=30` | SSE: aggregated report every N s | **Scalable** + Affordable |
 | GET | `/metrics` | – | Prometheus text format | observability |
+
+All non-static routes are rate-limited 60 req/min per client IP (proxy-aware:
+`Fly-Client-IP` → `X-Forwarded-For` → socket peer).
 
 ## Cost model
 - Free-tier deploy (Fly.io shared-cpu / Vercel hobby): \$0/mo for dev
 - Full deploy (10 providers × 30 countries × 30 s polling): ~\$5K/mo at production scale
 
 ## Changelog
+
+### v0.7.0 — 2026-07-11
+**Build (B) — EvoOracle flywheel (Evolving pillar — the moat):**
+- `evo_oracle.py` (stdlib-only): every aggregation run is captured as trajectory
+  signals (`trajectories.jsonl`, append-only) that evolve an integer-basis-point
+  fitness genome per provider×country source (`genome.json`, atomic writes).
+  Consensus becomes a fitness-weighted median; sources whose fitness collapses
+  below 2000 bps are quarantined (shadow-scored so they can recover past 3500 —
+  hysteresis prevents flapping). All-quarantined currencies fall back to the
+  unweighted robust consensus — the oracle never goes dark.
+- Rationale: a competitor can copy the provider registry; they cannot copy the
+  accumulated trajectory log or the genome distilled from it. Oracle quality is
+  now a function of operating history — every run widens the gap.
+- Surfaces: `POST /feeds/evolved`, `GET /evo/genome`, CLI `--evolved`,
+  dashboard footer counter ("N trajectories learned"). Persistence degrades
+  gracefully to memory-only on read-only filesystems (serverless).
+- `GET /rates` — one-GET adoption surface: compact rate map + optional inline
+  conversion (`?from=&to=&amount=`).
+
+**Improve (Im) — production hardening:**
+- Rate limiter now proxy-aware (`Fly-Client-IP` → first `X-Forwarded-For` hop →
+  socket peer) — previously all users behind Fly/Vercel shared one bucket.
+- Cache key space bounded (`tukey_k` quantized to 0.1); stale rate buckets
+  swept at 4096 entries; dashboard HTML read once at startup.
+- `--simulate` was a no-op (`store_true` + `default=True`); now
+  `BooleanOptionalAction` so `--no-simulate` exists.
+- `ORACLE_REFERENCE_RATES_JSON` env override — refresh bootstrap rates without
+  a redeploy.
+- Dashboard converts client-side from the loaded feed (instant, no rate-limit
+  burn per keystroke); fixed GitHub link (dnzengou); footer links `/rates` +
+  `/evo/genome`.
+
+**Consolidate (C):** `httpx` moved to `requirements-dev.txt` (test-only — was
+shipping in the production image); deleted stale `EVAL_REPORT.md` (claimed
+open findings long fixed) and superseded `AFRI_Blueprint_v01.md`.
+
+**Tests:** 43 → 62 (19 new: weighted-median math, genome evolution + clamps,
+quarantine/recovery hysteresis, persistence roundtrip, memory-only mode,
+evolved-aggregate shape + all-quarantined fallback, `/feeds/evolved`,
+`/evo/genome`, `/rates` map + conversion + rejection).
+
+### v0.6.0 — 2026-07-11 (merged from `claude/production-readiness-optimization-1pdati`, built 2026-06-25)
+- Production dashboard at `/` (self-contained SPA: converter + live rates,
+  dark/light, SSE-free 15 s polling).
+- `POST /convert` — cross-currency conversion via robust feed (remittance /
+  merchant / traveler flows).
+- CORS middleware, 10 s TTL cache on feed endpoints, per-IP 60/min rate limit,
+  aggregator refactor (`_collect_prices` / `_group_by_currency` /
+  `_consensus_for_currency`).
+- Tests 37 → 43. *(Retroactive entry per kafcade v2.5 audit-writes-lineage
+  rule — the branch predated this blueprint update.)*
 
 ### v0.5.0 — 2026-06-25
 **Build (B) — Tukey-fence outlier defense (Resilient pillar):**

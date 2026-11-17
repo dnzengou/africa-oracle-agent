@@ -8,6 +8,9 @@ Phase 0 of African stablecoin (AFRI Jetton on TON). Three reference implementati
 - `oracle_agent.go` — Go CLI port
 - `oracle_agent.sh` — POSIX shell port (for edge/embedded/PicoClaw)
 
+Plus the evolving layer (v0.7.0 — the moat):
+- `evo_oracle.py` — EvoOracle flywheel: trajectory capture (`trajectories.jsonl`) → integer-bps fitness genome (`genome.json`) → fitness-weighted consensus + quarantine. Persists to `$ORACLE_EVO_DIR` (default `./evo-data`); degrades to memory-only on read-only filesystems (Vercel etc.).
+
 Plus bridge layer:
 - `afri-bridge.sh` — Mobile money ↔ AFRI mint/burn orchestration
 - `afri-token.fc` — TON Jetton (TIP-74) smart contract
@@ -39,7 +42,7 @@ docker buildx build --platform linux/amd64,linux/arm64 -t africa-oracle:latest .
 docker run --rm africa-oracle:latest --provider mtn --country GH --pretty
 
 # Tests
-pytest tests/ -v       # 30 passing (20 core + 10 SDK)
+pytest tests/ -v       # 62 passing (33 core + 10 SDK + 19 evo)
 
 # Build all distribution artifacts
 bash sdk/build.sh      # → dist/{whl,tgz,zip,vsix}
@@ -47,8 +50,9 @@ bash sdk/build.sh      # → dist/{whl,tgz,zip,vsix}
 
 ## Conventions
 - All money amounts: integers in smallest unit (no float in financial paths)
-- Reference rates in `REFERENCE_RATES` are bootstrapped — production reads live API
-- Simulation mode is the default; `--simulate=False` requires real API keys (not yet implemented)
+- Reference rates in `REFERENCE_RATES` are bootstrapped — production reads live API; `ORACLE_REFERENCE_RATES_JSON` env merges overrides without a redeploy
+- Simulation mode is the default; `--no-simulate` requires real API keys (not yet implemented)
+- Runtime deps: **stdlib only** for `oracle_agent.py` + `evo_oracle.py`. Test-only deps (`pytest`, `httpx`) live in `requirements-dev.txt`, kept out of the production image.
 - Currency codes: ISO 4217 (KES, NGN, XOF, XAF, etc.)
 - Country codes: ISO 3166-1 alpha-2 (KE, NG, CI, etc.)
 
